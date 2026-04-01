@@ -5,6 +5,7 @@ FROM node:24.14.0-bookworm-slim
 ARG KUBECTL_VERSION=v1.35.3
 ARG PNPM_VERSION=10.27.0
 ARG MIRRORD_VERSION=3.195.0
+ARG AIR_VERSION=v1.64.5
 
 ENV GOROOT=/usr/local/go \
     GOPATH=/go \
@@ -30,6 +31,7 @@ RUN apt-get update \
     && chmod +x /usr/local/bin/kubectl \
     && curl -fsSL "https://github.com/metalbear-co/mirrord/releases/download/${MIRRORD_VERSION}/mirrord_linux_${MIRRORD_ARCH}" -o /usr/local/bin/mirrord \
     && chmod +x /usr/local/bin/mirrord \
+    && GOBIN=/usr/local/bin go install github.com/air-verse/air@${AIR_VERSION} \
     && corepack enable \
     && corepack prepare pnpm@${PNPM_VERSION} --activate \
     && rm -rf /var/lib/apt/lists/*
