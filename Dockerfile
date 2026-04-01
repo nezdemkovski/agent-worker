@@ -1,5 +1,11 @@
 FROM golang:1.26.1-bookworm AS go-toolchain
 
+WORKDIR /src
+COPY go.mod ./
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/dockhand ./cmd/dockhand
+
 FROM node:24.14.0-bookworm-slim
 
 ARG KUBECTL_VERSION=v1.35.3
@@ -12,6 +18,7 @@ ENV GOROOT=/usr/local/go \
     PATH=/usr/local/go/bin:/go/bin:${PATH}
 
 COPY --from=go-toolchain /usr/local/go /usr/local/go
+COPY --from=go-toolchain /out/dockhand /usr/local/bin/dockhand
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
