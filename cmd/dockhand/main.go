@@ -23,6 +23,8 @@ func main() {
 		os.Exit(runSupervise(os.Args[2:]))
 	case "terminate":
 		os.Exit(runTerminate(os.Args[2:]))
+	case "restart":
+		os.Exit(runRestart(os.Args[2:]))
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -95,6 +97,48 @@ func runTerminate(args []string) int {
 	return 0
 }
 
+func runRestart(args []string) int {
+	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+
+	pidFile := fs.String("pid-file", "", "path to pid file (reads old pid, writes new pid)")
+	readyURL := fs.String("ready-url", "", "readiness URL to poll")
+	readyTimeout := fs.Duration("ready-timeout", 30*time.Second, "maximum readiness wait time")
+	logFile := fs.String("log-file", "", "path to append child stdout/stderr")
+	grace := fs.Duration("grace", 5*time.Second, "grace period for old process termination")
+
+	cmdArgs, err := parseCommandArgs(fs, args)
+	if err != nil {
+		printKV("status", "error")
+		printKV("reason", err.Error())
+		return 2
+	}
+
+	result, err := worker.Restart(context.Background(), worker.RestartOptions{
+		PIDFile:      *pidFile,
+		Command:      cmdArgs,
+		ReadyURL:     *readyURL,
+		ReadyTimeout: *readyTimeout,
+		LogFile:      *logFile,
+		Grace:        *grace,
+	})
+	if err != nil {
+		printKV("status", "error")
+		var supErr *worker.SuperviseError
+		if errors.As(err, &supErr) {
+			printKV("reason_code", supErr.Code)
+		}
+		printKV("reason", err.Error())
+		return 1
+	}
+
+	printKV("status", "ok")
+	printKV("old_pid", fmt.Sprintf("%d", result.OldPID))
+	printKV("new_pid", fmt.Sprintf("%d", result.NewPID))
+	printKV("ready_url", result.ReadyURL)
+	return 0
+}
+
 func parseCommandArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	for i, arg := range args {
 		if arg == "--" {
@@ -124,6 +168,7 @@ dockhand is a small process supervisor for agent-worker images.
 Usage:
   dockhand supervise --ready-url URL [--ready-timeout DURATION] [--pid-file PATH] [--log-file PATH] -- <command...>
   dockhand terminate --pid PID [--grace DURATION]
+  dockhand restart --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
 `))
 }
 

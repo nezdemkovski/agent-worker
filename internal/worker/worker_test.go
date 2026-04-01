@@ -210,6 +210,122 @@ func waitForProcessExit(t *testing.T, pid int, timeout time.Duration) {
 	t.Fatalf("process %d did not exit within %s", pid, timeout)
 }
 
+func TestRestartTerminatesOldAndStartsNew(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process group assertions are unix-only")
+	}
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "service.pid")
+	logFile := filepath.Join(tmpDir, "service.log")
+	newReadyURL := helperReadyURL(t)
+
+	// Start an old process and record its pid
+	oldArgs := helperCommand("sleep-forever")
+	oldCmd := exec.Command(oldArgs[0], oldArgs[1:]...)
+	oldCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := oldCmd.Start(); err != nil {
+		t.Fatalf("start old process: %v", err)
+	}
+	oldPID := oldCmd.Process.Pid
+	t.Cleanup(func() {
+		_ = oldCmd.Process.Kill()
+		_ = oldCmd.Wait()
+	})
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", oldPID)), 0o644); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	// Reap old process once it exits so waitForProcessExit sees ESRCH.
+	// Without this the process stays a zombie (Kill(pid,0) succeeds on zombies).
+	go func() { _ = oldCmd.Wait() }()
+
+	result, err := Restart(context.Background(), RestartOptions{
+		PIDFile:      pidFile,
+		Command:      helperCommand("serve", newReadyURL),
+		ReadyURL:     newReadyURL,
+		ReadyTimeout: 5 * time.Second,
+		LogFile:      logFile,
+	})
+	if err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+	if result.OldPID != oldPID {
+		t.Fatalf("expected OldPID=%d, got %d", oldPID, result.OldPID)
+	}
+	if result.NewPID <= 0 || result.NewPID == oldPID {
+		t.Fatalf("unexpected NewPID=%d (OldPID=%d)", result.NewPID, oldPID)
+	}
+	if result.ReadyURL != newReadyURL {
+		t.Fatalf("expected ReadyURL=%q, got %q", newReadyURL, result.ReadyURL)
+	}
+
+	waitForProcessExit(t, oldPID, 3*time.Second)
+
+	if err := Terminate(result.NewPID, 2*time.Second); err != nil {
+		t.Logf("terminate new process: %v", err)
+	}
+}
+
+func TestRestartWhenOldProcessAlreadyDead(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "service.pid")
+	newReadyURL := helperReadyURL(t)
+
+	// Write a pid that is guaranteed not to be running
+	if err := os.WriteFile(pidFile, []byte("999999999\n"), 0o644); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	result, err := Restart(context.Background(), RestartOptions{
+		PIDFile:      pidFile,
+		Command:      helperCommand("serve", newReadyURL),
+		ReadyURL:     newReadyURL,
+		ReadyTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+	if result.OldPID != 999999999 {
+		t.Fatalf("expected OldPID=999999999, got %d", result.OldPID)
+	}
+	if result.NewPID <= 0 {
+		t.Fatalf("expected positive NewPID, got %d", result.NewPID)
+	}
+
+	if err := Terminate(result.NewPID, 2*time.Second); err != nil {
+		t.Logf("terminate new process: %v", err)
+	}
+}
+
+func TestRestartFailsWhenNewProcessExitsBeforeReady(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "service.pid")
+	readyURL := helperReadyURL(t)
+
+	_, err := Restart(context.Background(), RestartOptions{
+		PIDFile:      pidFile,
+		Command:      helperCommand("exit-immediately"),
+		ReadyURL:     readyURL,
+		ReadyTimeout: 2 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("Restart() expected error, got nil")
+	}
+	var supErr *SuperviseError
+	if !errors.As(err, &supErr) {
+		t.Fatalf("expected *SuperviseError, got %T: %v", err, err)
+	}
+	if supErr.Code != "exited_before_ready" {
+		t.Fatalf("expected Code %q, got %q", "exited_before_ready", supErr.Code)
+	}
+}
+
 func TestWorkerHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
