@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const goosWindows = "windows"
+
 type SuperviseOptions struct {
 	Command      []string
 	ReadyURL     string
@@ -40,7 +42,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (*SuperviseResult, er
 	}
 
 	cmd := exec.CommandContext(ctx, opts.Command[0], opts.Command[1:]...)
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 
@@ -119,7 +121,7 @@ func Terminate(pid int, grace time.Duration) error {
 }
 
 func terminateProcessTree(pid int, grace time.Duration) error {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		process, err := os.FindProcess(pid)
 		if err != nil {
 			return err
@@ -158,7 +160,7 @@ func processRunning(pid int) (bool, error) {
 		}
 		return false, err
 	}
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		return true, nil
 	}
 
