@@ -32,6 +32,16 @@ RUN apt-get update \
     && curl -fsSL "https://github.com/metalbear-co/mirrord/releases/download/${MIRRORD_VERSION}/mirrord_linux_${MIRRORD_ARCH}" -o /usr/local/bin/mirrord \
     && chmod +x /usr/local/bin/mirrord \
     && GOBIN=/usr/local/bin go install github.com/air-verse/air@${AIR_VERSION} \
+    && npm install -g @anthropic-ai/claude-code@latest \
+    && case "${ARCH}" in \
+         amd64) CODEX_ARCH="x86_64" ;; \
+         arm64) CODEX_ARCH="aarch64" ;; \
+         *) echo "unsupported architecture: ${ARCH}" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/openai/codex/releases/latest/download/codex-${CODEX_ARCH}-unknown-linux-musl.tar.gz" \
+       | tar -xz -C /usr/local/bin \
+    && mv /usr/local/bin/codex-${CODEX_ARCH}-unknown-linux-musl /usr/local/bin/codex \
+    && chmod +x /usr/local/bin/codex \
     && corepack enable \
     && corepack prepare pnpm@${PNPM_VERSION} --activate \
     && rm -rf /var/lib/apt/lists/*
