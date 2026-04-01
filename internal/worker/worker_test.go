@@ -79,6 +79,37 @@ func TestSuperviseFailsWhenProcessExitsBeforeReady(t *testing.T) {
 	if !strings.Contains(err.Error(), "exited before readiness") {
 		t.Fatalf("expected exited-before-readiness error, got %v", err)
 	}
+	var supErr *SuperviseError
+	if !errors.As(err, &supErr) {
+		t.Fatalf("expected *SuperviseError, got %T: %v", err, err)
+	}
+	if supErr.Code != "exited_before_ready" {
+		t.Fatalf("expected Code %q, got %q", "exited_before_ready", supErr.Code)
+	}
+}
+
+func TestSuperviseTimesOutWhenNeverReady(t *testing.T) {
+	t.Parallel()
+
+	readyURL := helperReadyURL(t)
+	_, err := Supervise(context.Background(), SuperviseOptions{
+		Command:      helperCommand("sleep-forever"),
+		ReadyURL:     readyURL,
+		ReadyTimeout: 300 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("Supervise() expected error, got nil")
+	}
+	var supErr *SuperviseError
+	if !errors.As(err, &supErr) {
+		t.Fatalf("expected *SuperviseError, got %T: %v", err, err)
+	}
+	if supErr.Code != "timeout" {
+		t.Fatalf("expected Code %q, got %q", "timeout", supErr.Code)
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("expected timeout in error message, got %v", err)
+	}
 }
 
 func TestTerminateKillsProcessGroup(t *testing.T) {

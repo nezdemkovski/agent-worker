@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -57,6 +58,10 @@ func runSupervise(args []string) int {
 	})
 	if err != nil {
 		printKV("status", "error")
+		var supErr *worker.SuperviseError
+		if errors.As(err, &supErr) {
+			printKV("reason_code", supErr.Code)
+		}
 		printKV("reason", err.Error())
 		return 1
 	}
