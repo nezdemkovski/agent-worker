@@ -121,15 +121,16 @@ func bootstrapPayloadRepos(payload *WorkerPayload, workspaceDir string, arts wor
 }
 
 type verifyProbe struct {
-	profiles  []string
-	detector  string // "go.mod", "package.json", or "" for smoke
-	tools     []string
-	eventCode EventCode
-	eventMsg  string
-	failLevel EventLevel
-	failMsg   string
-	buildArgs func(target, repoDir string) []string
-	planFmt   func(target string) string
+	profiles   []string
+	detector   string // "go.mod", "package.json", or "" for smoke
+	missingMsg string
+	tools      []string
+	eventCode  EventCode
+	eventMsg   string
+	failLevel  EventLevel
+	failMsg    string
+	buildArgs  func(target, repoDir string) []string
+	planFmt    func(target string) string
 }
 
 var verifyProbes = []verifyProbe{
@@ -144,26 +145,32 @@ var verifyProbes = []verifyProbe{
 		planFmt:   func(target string) string { return fmt.Sprintf("mirrord exec --target %s -- true", target) },
 	},
 	{
-		profiles:  []string{"backend", "full"},
-		detector:  "go.mod",
-		tools:     []string{"mirrord", "go"},
-		eventCode: CodeMirrordGoTest,
-		eventMsg:  "go test via mirrord",
-		failLevel: LevelError,
-		failMsg:   "mirrord go test ./...",
-		buildArgs: func(target, _ string) []string { return []string{"mirrord", "exec", "--target", target, "--", "go", "test", "./..."} },
-		planFmt:   func(target string) string { return fmt.Sprintf("mirrord exec --target %s -- go test ./...", target) },
+		profiles:   []string{"backend", "full"},
+		detector:   "go.mod",
+		missingMsg: "backend repo not detected",
+		tools:      []string{"mirrord", "go"},
+		eventCode:  CodeMirrordGoTest,
+		eventMsg:   "go test via mirrord",
+		failLevel:  LevelError,
+		failMsg:    "mirrord go test ./...",
+		buildArgs: func(target, _ string) []string {
+			return []string{"mirrord", "exec", "--target", target, "--", "go", "test", "./..."}
+		},
+		planFmt: func(target string) string { return fmt.Sprintf("mirrord exec --target %s -- go test ./...", target) },
 	},
 	{
-		profiles:  []string{"frontend"},
-		detector:  "package.json",
-		tools:     []string{"mirrord", "pnpm"},
-		eventCode: CodeMirrordPnpmTest,
-		eventMsg:  "pnpm test via mirrord",
-		failLevel: LevelError,
-		failMsg:   "mirrord pnpm test",
-		buildArgs: func(target, _ string) []string { return []string{"mirrord", "exec", "--target", target, "--", "pnpm", "test"} },
-		planFmt:   func(target string) string { return fmt.Sprintf("mirrord exec --target %s -- pnpm test", target) },
+		profiles:   []string{"frontend"},
+		detector:   "package.json",
+		missingMsg: "frontend repo not detected",
+		tools:      []string{"mirrord", "pnpm"},
+		eventCode:  CodeMirrordPnpmTest,
+		eventMsg:   "pnpm test via mirrord",
+		failLevel:  LevelError,
+		failMsg:    "mirrord pnpm test",
+		buildArgs: func(target, _ string) []string {
+			return []string{"mirrord", "exec", "--target", target, "--", "pnpm", "test"}
+		},
+		planFmt: func(target string) string { return fmt.Sprintf("mirrord exec --target %s -- pnpm test", target) },
 	},
 }
 
@@ -198,7 +205,7 @@ func runVerifyServiceProbes(ctx context.Context, payload *WorkerPayload, service
 				continue
 			}
 			if !fileExists(filepath.Join(repoDir, probe.detector)) {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelInfo, probe.detector+" not detected at "+repoDir), service, nil))
+				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelInfo, probe.missingMsg+" at "+repoDir), service, nil))
 				continue
 			}
 		}
