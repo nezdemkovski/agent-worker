@@ -25,10 +25,10 @@ const (
 type StartStrategy string
 
 const (
-	StrategyGoRun    StartStrategy = "go-run"
-	StrategyAir      StartStrategy = "air"
-	StrategyNpmAuto  StartStrategy = "npm-auto"
-	StrategyPnpmDev  StartStrategy = "pnpm-dev"
+	StrategyGoRun     StartStrategy = "go-run"
+	StrategyAir       StartStrategy = "air"
+	StrategyNpmAuto   StartStrategy = "npm-auto"
+	StrategyPnpmDev   StartStrategy = "pnpm-dev"
 	StrategyPnpmStart StartStrategy = "pnpm-start"
 )
 

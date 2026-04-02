@@ -18,20 +18,12 @@ type StartPlanOptions struct {
 	Port           string
 }
 
-type StartPlan struct {
-	RuntimeProfile   RuntimeProfile
-	ResolvedStrategy string
-	StartCommand     string
-	StartDescription string
-	Plan             *TypedStartPlan
-}
-
-func PlanStart(opts StartPlanOptions) (StartPlan, error) {
+func PlanStart(opts StartPlanOptions) (*TypedStartPlan, error) {
 	if opts.WorkDir == "" {
-		return StartPlan{}, fmt.Errorf("no matching repo checkout at %s", opts.WorkDir)
+		return nil, fmt.Errorf("no matching repo checkout at %s", opts.WorkDir)
 	}
 	if info, err := os.Stat(opts.WorkDir); err != nil || !info.IsDir() {
-		return StartPlan{}, fmt.Errorf("no matching repo checkout at %s", opts.WorkDir)
+		return nil, fmt.Errorf("no matching repo checkout at %s", opts.WorkDir)
 	}
 
 	profile := opts.RuntimeProfile
@@ -51,23 +43,21 @@ func PlanStart(opts StartPlanOptions) (StartPlan, error) {
 	case ProfileNodeHTTP:
 		return planNodeHTTP(opts, strategy)
 	default:
-		return StartPlan{}, fmt.Errorf("unsupported runtime/start strategy %s:%s", profile, strategy)
+		return nil, fmt.Errorf("unsupported runtime/start strategy %s:%s", profile, strategy)
 	}
 }
 
-func planGoHTTP(opts StartPlanOptions, strategy StartStrategy) (StartPlan, error) {
+func planGoHTTP(opts StartPlanOptions, strategy StartStrategy) (*TypedStartPlan, error) {
 	entrypoint := opts.EntryPoint
 	if entrypoint == "" {
 		entrypoint = fmt.Sprintf("./cmd/%s/main.go", opts.Service)
 	}
 	if !fileExists(filepath.Join(opts.WorkDir, strings.TrimPrefix(entrypoint, "./"))) && !fileExists(entrypoint) {
-		return StartPlan{}, fmt.Errorf("unsupported service entrypoint %s", entrypoint)
+		return nil, fmt.Errorf("unsupported service entrypoint %s", entrypoint)
 	}
 	if _, err := exec.LookPath("go"); err != nil {
-		return StartPlan{}, fmt.Errorf("go unavailable")
+		return nil, fmt.Errorf("go unavailable")
 	}
-
-	plan := StartPlan{RuntimeProfile: opts.RuntimeProfile, ResolvedStrategy: string(strategy)}
 
 	checks := []PlanCheck{
 		{Type: CheckFileExists, Path: filepath.Join(opts.WorkDir, strings.TrimPrefix(entrypoint, "./"))},
@@ -77,70 +67,48 @@ func planGoHTTP(opts StartPlanOptions, strategy StartStrategy) (StartPlan, error
 	switch strategy {
 	case StrategyAir:
 		if _, err := exec.LookPath("air"); err != nil {
-			return StartPlan{}, fmt.Errorf("air unavailable")
+			return nil, fmt.Errorf("air unavailable")
 		}
 		checks = append(checks, PlanCheck{Type: CheckCommandExists, Name: "air"})
-		plan.StartCommand = fmt.Sprintf(`set -eu
-cd %s
-mkdir -p .ndev-air
-cat > .ndev-air.toml <<EOF
-root = "."
-tmp_dir = ".ndev-air"
-
-[build]
-  cmd = "go build -o ./.ndev-air/service %s"
-  bin = "./.ndev-air/service"
-  entrypoint = ["./.ndev-air/service", "--port", %s]
-  exclude_dir = ["assets", "tmp", "vendor", "testdata", ".git", "node_modules", ".ndev-air"]
-  send_interrupt = true
-  stop_on_error = true
-
-[log]
-  main_only = true
-EOF
-exec air -c .ndev-air.toml`, shellQuote(opts.WorkDir), entrypoint, shellQuote(opts.Port))
-		plan.StartDescription = fmt.Sprintf("cd %s && write .ndev-air.toml && air -c .ndev-air.toml", opts.WorkDir)
-		plan.Plan = &TypedStartPlan{
+		return &TypedStartPlan{
 			RuntimeProfile: string(opts.RuntimeProfile),
 			Strategy:       string(StrategyAir),
 			Workdir:        opts.WorkDir,
 			Checks:         checks,
 			Steps: []PlanStep{
-				{Command: "air", Args: []string{"-c", ".ndev-air.toml"}, Workdir: opts.WorkDir, Exec: true},
+				{Type: StepMkdirAll, Path: filepath.Join(opts.WorkDir, ".ndev-air"), Mode: 0o755},
+				{Type: StepWriteFile, Path: filepath.Join(opts.WorkDir, ".ndev-air.toml"), Mode: 0o644, Content: airConfig(entrypoint, opts.Port)},
+				{Type: StepRun, Command: "air", Args: []string{"-c", ".ndev-air.toml"}, Workdir: opts.WorkDir, Exec: true},
 			},
-			Description: plan.StartDescription,
-		}
+			Description: "prepare Air config and start air",
+		}, nil
 	case StrategyGoRun, "":
-		plan.ResolvedStrategy = string(StrategyGoRun)
-		plan.StartCommand = fmt.Sprintf("set -eu && cd %s && exec go run %s --port %s", shellQuote(opts.WorkDir), shellQuote(entrypoint), shellQuote(opts.Port))
-		plan.StartDescription = fmt.Sprintf("cd %s && go run %s --port %s", opts.WorkDir, entrypoint, opts.Port)
-		plan.Plan = &TypedStartPlan{
+		return &TypedStartPlan{
 			RuntimeProfile: string(opts.RuntimeProfile),
 			Strategy:       string(StrategyGoRun),
 			Workdir:        opts.WorkDir,
 			Checks:         checks,
 			Steps: []PlanStep{
-				{Command: "go", Args: []string{"run", entrypoint, "--port", opts.Port}, Workdir: opts.WorkDir, Exec: true},
+				{Type: StepRun, Command: "go", Args: []string{"run", entrypoint, "--port", opts.Port}, Workdir: opts.WorkDir, Exec: true},
 			},
-			Description: plan.StartDescription,
-		}
+			Description: "run go service entrypoint",
+		}, nil
 	default:
-		return StartPlan{}, fmt.Errorf("unsupported runtime/start strategy %s:%s", opts.RuntimeProfile, strategy)
+		return nil, fmt.Errorf("unsupported runtime/start strategy %s:%s", opts.RuntimeProfile, strategy)
 	}
-	return plan, nil
 }
 
-func planNodeHTTP(opts StartPlanOptions, strategy StartStrategy) (StartPlan, error) {
+func planNodeHTTP(opts StartPlanOptions, strategy StartStrategy) (*TypedStartPlan, error) {
 	packageJSON := filepath.Join(opts.WorkDir, "package.json")
 	if !fileExists(packageJSON) {
-		return StartPlan{}, fmt.Errorf("package.json not found at %s", opts.WorkDir)
+		return nil, fmt.Errorf("package.json not found at %s", opts.WorkDir)
 	}
 	if _, err := exec.LookPath("pnpm"); err != nil {
-		return StartPlan{}, fmt.Errorf("pnpm unavailable")
+		return nil, fmt.Errorf("pnpm unavailable")
 	}
 	scripts, err := readPackageScripts(packageJSON)
 	if err != nil {
-		return StartPlan{}, err
+		return nil, err
 	}
 
 	portEnv := map[string]string{"PORT": opts.Port}
@@ -150,12 +118,10 @@ func planNodeHTTP(opts StartPlanOptions, strategy StartStrategy) (StartPlan, err
 		{Type: CheckDirExists, Path: filepath.Join(opts.WorkDir, "node_modules")},
 	}
 
-	plan := StartPlan{RuntimeProfile: opts.RuntimeProfile, ResolvedStrategy: string(strategy)}
 	switch strategy {
 	case StrategyNpmAuto, "":
-		plan.ResolvedStrategy = string(StrategyNpmAuto)
 		if _, err := exec.LookPath("npm"); err != nil {
-			return StartPlan{}, fmt.Errorf("npm unavailable")
+			return nil, fmt.Errorf("npm unavailable")
 		}
 		checks := append(baseChecks, PlanCheck{Type: CheckCommandExists, Name: "npm"})
 		hasStart := scripts["start"]
@@ -163,102 +129,89 @@ func planNodeHTTP(opts StartPlanOptions, strategy StartStrategy) (StartPlan, err
 		hasDev := scripts["dev"]
 		switch {
 		case hasStart && hasBuild && hasDev:
-			plan.StartCommand = fmt.Sprintf("set -eu && cd %s && if [ ! -d node_modules ]; then echo \"missing node_modules after bootstrap\" >&2; exit 1; fi && export PORT=%s && if npm run build; then exec npm run start; else echo \"[ndev] npm-auto build failed, falling back to npm run dev\" >&2; exec npm run dev; fi", shellQuote(opts.WorkDir), shellQuote(opts.Port))
-			plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s try npm run build && npm run start, fallback to npm run dev", opts.WorkDir, opts.Port)
-			plan.Plan = &TypedStartPlan{
+			return &TypedStartPlan{
 				RuntimeProfile: string(opts.RuntimeProfile),
 				Strategy:       string(StrategyNpmAuto),
 				Workdir:        opts.WorkDir,
 				Env:            portEnv,
 				Checks:         checks,
 				Steps: []PlanStep{
-					{Command: "npm", Args: []string{"run", "build"}, Workdir: opts.WorkDir, Env: portEnv},
-					{Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
+					{Type: StepRun, Command: "npm", Args: []string{"run", "build"}, Workdir: opts.WorkDir, Env: portEnv},
+					{Type: StepRun, Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
 				},
 				Fallback: []PlanStep{
-					{Command: "npm", Args: []string{"run", "dev"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
+					{Type: StepRun, Command: "npm", Args: []string{"run", "dev"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
 				},
-				Description: plan.StartDescription,
-			}
+				Description: "try npm run build and npm run start, fallback to npm run dev",
+			}, nil
 		case hasStart && hasBuild:
-			plan.StartCommand = fmt.Sprintf("set -eu && cd %s && if [ ! -d node_modules ]; then echo \"missing node_modules after bootstrap\" >&2; exit 1; fi && export PORT=%s && npm run build && exec npm run start", shellQuote(opts.WorkDir), shellQuote(opts.Port))
-			plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run build && npm run start", opts.WorkDir, opts.Port)
-			plan.Plan = &TypedStartPlan{
+			return &TypedStartPlan{
 				RuntimeProfile: string(opts.RuntimeProfile),
 				Strategy:       string(StrategyNpmAuto),
 				Workdir:        opts.WorkDir,
 				Env:            portEnv,
 				Checks:         checks,
 				Steps: []PlanStep{
-					{Command: "npm", Args: []string{"run", "build"}, Workdir: opts.WorkDir, Env: portEnv},
-					{Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
+					{Type: StepRun, Command: "npm", Args: []string{"run", "build"}, Workdir: opts.WorkDir, Env: portEnv},
+					{Type: StepRun, Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
 				},
-				Description: plan.StartDescription,
-			}
+				Description: "run npm build and npm start",
+			}, nil
 		case hasStart:
-			plan.StartCommand = fmt.Sprintf("set -eu && cd %s && if [ ! -d node_modules ]; then echo \"missing node_modules after bootstrap\" >&2; exit 1; fi && export PORT=%s && exec npm run start", shellQuote(opts.WorkDir), shellQuote(opts.Port))
-			plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run start", opts.WorkDir, opts.Port)
-			plan.Plan = &TypedStartPlan{
+			return &TypedStartPlan{
 				RuntimeProfile: string(opts.RuntimeProfile),
 				Strategy:       string(StrategyNpmAuto),
 				Workdir:        opts.WorkDir,
 				Env:            portEnv,
 				Checks:         checks,
 				Steps: []PlanStep{
-					{Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
+					{Type: StepRun, Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
 				},
-				Description: plan.StartDescription,
-			}
+				Description: "run npm start",
+			}, nil
 		case hasDev:
-			plan.StartCommand = fmt.Sprintf("set -eu && cd %s && if [ ! -d node_modules ]; then echo \"missing node_modules after bootstrap\" >&2; exit 1; fi && export PORT=%s && exec npm run dev", shellQuote(opts.WorkDir), shellQuote(opts.Port))
-			plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run dev", opts.WorkDir, opts.Port)
-			plan.Plan = &TypedStartPlan{
+			return &TypedStartPlan{
 				RuntimeProfile: string(opts.RuntimeProfile),
 				Strategy:       string(StrategyNpmAuto),
 				Workdir:        opts.WorkDir,
 				Env:            portEnv,
 				Checks:         checks,
 				Steps: []PlanStep{
-					{Command: "npm", Args: []string{"run", "dev"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
+					{Type: StepRun, Command: "npm", Args: []string{"run", "dev"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
 				},
-				Description: plan.StartDescription,
-			}
+				Description: "run npm dev",
+			}, nil
 		default:
-			return StartPlan{}, fmt.Errorf("package.json is missing both start and dev scripts")
+			return nil, fmt.Errorf("package.json is missing both start and dev scripts")
 		}
 	case StrategyPnpmDev:
 		checks := append(baseChecks[:2:2], PlanCheck{Type: CheckFileExists, Path: filepath.Join(opts.WorkDir, "node_modules/.bin/tsx")})
-		plan.StartCommand = fmt.Sprintf("set -eu && cd %s && if [ ! -x node_modules/.bin/tsx ]; then echo \"missing node_modules/.bin/tsx after bootstrap\" >&2; exit 1; fi && export PORT=%s && exec npm run dev", shellQuote(opts.WorkDir), shellQuote(opts.Port))
-		plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run dev", opts.WorkDir, opts.Port)
-		plan.Plan = &TypedStartPlan{
+		return &TypedStartPlan{
 			RuntimeProfile: string(opts.RuntimeProfile),
 			Strategy:       string(StrategyPnpmDev),
 			Workdir:        opts.WorkDir,
 			Env:            portEnv,
 			Checks:         checks,
 			Steps: []PlanStep{
-				{Command: "npm", Args: []string{"run", "dev"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
+				{Type: StepRun, Command: "npm", Args: []string{"run", "dev"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
 			},
-			Description: plan.StartDescription,
-		}
+			Description: "run npm dev",
+		}, nil
 	case StrategyPnpmStart:
-		plan.StartCommand = fmt.Sprintf("set -eu && cd %s && if [ ! -d node_modules ]; then echo \"missing node_modules after bootstrap\" >&2; exit 1; fi && export PORT=%s && exec npm run start", shellQuote(opts.WorkDir), shellQuote(opts.Port))
-		plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run start", opts.WorkDir, opts.Port)
-		plan.Plan = &TypedStartPlan{
+		return &TypedStartPlan{
 			RuntimeProfile: string(opts.RuntimeProfile),
 			Strategy:       string(StrategyPnpmStart),
 			Workdir:        opts.WorkDir,
 			Env:            portEnv,
 			Checks:         baseChecks,
 			Steps: []PlanStep{
-				{Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
+				{Type: StepRun, Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
 			},
-			Description: plan.StartDescription,
-		}
+			Description: "run npm start",
+		}, nil
 	default:
-		return StartPlan{}, fmt.Errorf("unsupported runtime/start strategy %s:%s", opts.RuntimeProfile, strategy)
+		return nil, fmt.Errorf("unsupported runtime/start strategy %s:%s", opts.RuntimeProfile, strategy)
 	}
-	return plan, nil
 }
 
 func readPackageScripts(path string) (map[string]bool, error) {
@@ -289,9 +242,19 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func shellQuote(value string) string {
-	if value == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+func airConfig(entrypoint, port string) string {
+	return fmt.Sprintf(`root = "."
+tmp_dir = ".ndev-air"
+
+[build]
+  cmd = "go build -o ./.ndev-air/service %s"
+  bin = "./.ndev-air/service"
+  entrypoint = ["./.ndev-air/service", "--port", %q]
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", ".git", "node_modules", ".ndev-air"]
+  send_interrupt = true
+  stop_on_error = true
+
+[log]
+  main_only = true
+`, entrypoint, port)
 }

@@ -26,9 +26,21 @@ type PlanCheck struct {
 }
 
 type PlanStep struct {
-	Command string            `json:"command"`
+	Type    StepType          `json:"type,omitempty"`
+	Command string            `json:"command,omitempty"`
 	Args    []string          `json:"args,omitempty"`
 	Workdir string            `json:"workdir,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	Exec    bool              `json:"exec,omitempty"`
+	Path    string            `json:"path,omitempty"`
+	Content string            `json:"content,omitempty"`
+	Mode    uint32            `json:"mode,omitempty"`
 }
+
+type StepType string
+
+const (
+	StepRun       StepType = "run"
+	StepMkdirAll  StepType = "mkdir_all"
+	StepWriteFile StepType = "write_file"
+)

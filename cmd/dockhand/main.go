@@ -76,11 +76,10 @@ func runPlanStart(args []string) int {
 
 	emitJSON(startPlanResponse{
 		Status:           worker.StatusOK,
-		RuntimeProfile:   string(plan.RuntimeProfile),
-		StartStrategy:    plan.ResolvedStrategy,
-		StartCommand:     plan.StartCommand,
-		StartDescription: plan.StartDescription,
-		Plan:             plan.Plan,
+		RuntimeProfile:   plan.RuntimeProfile,
+		StartStrategy:    plan.Strategy,
+		StartDescription: plan.Description,
+		Plan:             plan,
 	})
 	return 0
 }

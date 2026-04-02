@@ -305,3 +305,38 @@ func TestExecPlanChecksFailure(t *testing.T) {
 		t.Fatal("expected error from failing check")
 	}
 }
+
+func TestExecPlanAppliesMkdirAndWriteFileSteps(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, ".ndev-air")
+	file := filepath.Join(root, ".ndev-air.toml")
+	plan := &TypedStartPlan{
+		Workdir: root,
+		Steps: []PlanStep{
+			{Type: StepMkdirAll, Path: dir, Mode: 0o755},
+			{Type: StepWriteFile, Path: file, Mode: 0o644, Content: "root = \".\"\n"},
+		},
+	}
+
+	if err := ExecPlan(plan); err != nil {
+		t.Fatalf("ExecPlan() error = %v", err)
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected directory at %s", dir)
+	}
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != "root = \".\"\n" {
+		t.Fatalf("unexpected file content: %q", string(data))
+	}
+}

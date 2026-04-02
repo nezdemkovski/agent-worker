@@ -28,15 +28,15 @@ func TestTypedPlanGoRunShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanStart() error = %v", err)
 	}
-	if plan.Plan == nil {
+	if plan == nil {
 		t.Fatal("expected typed plan, got nil")
 	}
 
-	tp := plan.Plan
-	if tp.RuntimeProfile != "go-http" {
+	tp := plan
+	if tp.RuntimeProfile != string(ProfileGoHTTP) {
 		t.Fatalf("expected go-http, got %q", tp.RuntimeProfile)
 	}
-	if tp.Strategy != "go-run" {
+	if tp.Strategy != string(StrategyGoRun) {
 		t.Fatalf("expected go-run, got %q", tp.Strategy)
 	}
 	if tp.Workdir != repoDir {
@@ -47,10 +47,10 @@ func TestTypedPlanGoRunShape(t *testing.T) {
 	if len(tp.Checks) < 2 {
 		t.Fatalf("expected at least 2 checks, got %d", len(tp.Checks))
 	}
-	if tp.Checks[0].Type != "file_exists" {
+	if tp.Checks[0].Type != CheckFileExists {
 		t.Fatalf("expected file_exists check, got %q", tp.Checks[0].Type)
 	}
-	if tp.Checks[1].Type != "command_exists" || tp.Checks[1].Name != "go" {
+	if tp.Checks[1].Type != CheckCommandExists || tp.Checks[1].Name != "go" {
 		t.Fatalf("expected command_exists go check, got %+v", tp.Checks[1])
 	}
 
@@ -96,12 +96,12 @@ func TestTypedPlanNpmAutoWithFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanStart() error = %v", err)
 	}
-	if plan.Plan == nil {
+	if plan == nil {
 		t.Fatal("expected typed plan, got nil")
 	}
 
-	tp := plan.Plan
-	if tp.Strategy != "npm-auto" {
+	tp := plan
+	if tp.Strategy != string(StrategyNpmAuto) {
 		t.Fatalf("expected npm-auto, got %q", tp.Strategy)
 	}
 	if tp.Env["PORT"] != "3200" {
@@ -146,7 +146,7 @@ func TestTypedPlanNpmAutoStartOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanStart() error = %v", err)
 	}
-	tp := plan.Plan
+	tp := plan
 	if tp == nil {
 		t.Fatal("expected typed plan")
 	}
@@ -174,17 +174,17 @@ func TestTypedPlanPnpmDev(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanStart() error = %v", err)
 	}
-	tp := plan.Plan
+	tp := plan
 	if tp == nil {
 		t.Fatal("expected typed plan")
 	}
-	if tp.Strategy != "pnpm-dev" {
+	if tp.Strategy != string(StrategyPnpmDev) {
 		t.Fatalf("expected pnpm-dev, got %q", tp.Strategy)
 	}
 	// pnpm-dev checks for tsx binary, not node_modules dir
 	hasTsxCheck := false
 	for _, c := range tp.Checks {
-		if c.Type == "file_exists" && filepath.Base(c.Path) == "tsx" {
+		if c.Type == CheckFileExists && filepath.Base(c.Path) == "tsx" {
 			hasTsxCheck = true
 		}
 	}
@@ -209,11 +209,11 @@ func TestTypedPlanPnpmStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanStart() error = %v", err)
 	}
-	tp := plan.Plan
+	tp := plan
 	if tp == nil {
 		t.Fatal("expected typed plan")
 	}
-	if tp.Strategy != "pnpm-start" {
+	if tp.Strategy != string(StrategyPnpmStart) {
 		t.Fatalf("expected pnpm-start, got %q", tp.Strategy)
 	}
 	if len(tp.Steps) != 1 || tp.Steps[0].Args[1] != "start" {
@@ -243,7 +243,7 @@ func TestTypedPlanIsValidJSON(t *testing.T) {
 		t.Fatalf("PlanStart() error = %v", err)
 	}
 
-	data, err := json.Marshal(plan.Plan)
+	data, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -252,10 +252,10 @@ func TestTypedPlanIsValidJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &roundtrip); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
-	if roundtrip.Strategy != plan.Plan.Strategy {
-		t.Fatalf("roundtrip strategy mismatch: %q vs %q", roundtrip.Strategy, plan.Plan.Strategy)
+	if roundtrip.Strategy != plan.Strategy {
+		t.Fatalf("roundtrip strategy mismatch: %q vs %q", roundtrip.Strategy, plan.Strategy)
 	}
-	if len(roundtrip.Steps) != len(plan.Plan.Steps) {
-		t.Fatalf("roundtrip steps mismatch: %d vs %d", len(roundtrip.Steps), len(plan.Plan.Steps))
+	if len(roundtrip.Steps) != len(plan.Steps) {
+		t.Fatalf("roundtrip steps mismatch: %d vs %d", len(roundtrip.Steps), len(plan.Steps))
 	}
 }

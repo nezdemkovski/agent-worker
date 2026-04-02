@@ -28,14 +28,14 @@ func TestPlanStartGoHTTPDefaultsToGoRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanStart() error = %v", err)
 	}
-	if plan.ResolvedStrategy != "go-run" {
-		t.Fatalf("expected go-run strategy, got %q", plan.ResolvedStrategy)
+	if plan.Strategy != string(StrategyGoRun) {
+		t.Fatalf("expected go-run strategy, got %q", plan.Strategy)
 	}
-	if !strings.Contains(plan.StartCommand, "exec go run './cmd/svc/main.go' --port '31140'") {
-		t.Fatalf("unexpected start command: %s", plan.StartCommand)
+	if !strings.Contains(plan.Description, "run go service entrypoint") {
+		t.Fatalf("unexpected start description: %s", plan.Description)
 	}
-	if !strings.Contains(plan.StartDescription, "go run ./cmd/svc/main.go --port 31140") {
-		t.Fatalf("unexpected start description: %s", plan.StartDescription)
+	if len(plan.Steps) != 1 || plan.Steps[0].Type != StepRun {
+		t.Fatalf("expected single run step, got %+v", plan.Steps)
 	}
 }
 
@@ -54,14 +54,17 @@ func TestPlanStartNodeHTTPNpmAutoBuildFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanStart() error = %v", err)
 	}
-	if plan.ResolvedStrategy != "npm-auto" {
-		t.Fatalf("expected npm-auto strategy, got %q", plan.ResolvedStrategy)
+	if plan.Strategy != string(StrategyNpmAuto) {
+		t.Fatalf("expected npm-auto strategy, got %q", plan.Strategy)
 	}
-	if !strings.Contains(plan.StartCommand, "if npm run build; then exec npm run start; else") {
-		t.Fatalf("unexpected npm-auto command: %s", plan.StartCommand)
+	if !strings.Contains(plan.Description, "fallback to npm run dev") {
+		t.Fatalf("unexpected description: %s", plan.Description)
 	}
-	if !strings.Contains(plan.StartDescription, "fallback to npm run dev") {
-		t.Fatalf("unexpected description: %s", plan.StartDescription)
+	if len(plan.Steps) != 2 || plan.Steps[0].Type != StepRun || plan.Steps[1].Type != StepRun {
+		t.Fatalf("expected build/start run steps, got %+v", plan.Steps)
+	}
+	if len(plan.Fallback) != 1 || plan.Fallback[0].Type != StepRun {
+		t.Fatalf("expected single run fallback, got %+v", plan.Fallback)
 	}
 }
 
