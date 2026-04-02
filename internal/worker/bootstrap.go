@@ -54,13 +54,7 @@ func BootstrapRepo(opts BootstrapRepoOptions) (*BootstrapRepoResult, error) {
 		return result, fmt.Errorf("mkdir repo dir: %w", err)
 	}
 
-	shallow := opts.RunMode == RunModeService || opts.RunMode == RunModeSmoke
-	clonePlan := fmt.Sprintf("git clone %s %s", opts.RemoteURL, opts.RepoDir)
-	if shallow {
-		clonePlan = fmt.Sprintf("git clone --depth 1 %s %s", opts.RemoteURL, opts.RepoDir)
-	}
-	result.ClonePlan = append(result.ClonePlan, clonePlan)
-	result.ClonePlan = append(result.ClonePlan, fmt.Sprintf("git -C %s fetch --all --prune", opts.RepoDir))
+	buildClonePlan(result, opts)
 
 	if !commandExists("git") {
 		result.addCheckoutWarning(opts.Repo, "git unavailable in worker image")
@@ -68,121 +62,157 @@ func BootstrapRepo(opts BootstrapRepoOptions) (*BootstrapRepoResult, error) {
 		return result, nil
 	}
 
+	if err := cloneOrFetch(result, opts); err != nil {
+		return result, err
+	}
+	if err := checkoutBranch(result, opts); err != nil {
+		return result, err
+	}
+
+	bootstrapGo(result, opts)
+	bootstrapPNPM(result, opts)
+
+	return result, nil
+}
+
+func buildClonePlan(result *BootstrapRepoResult, opts BootstrapRepoOptions) {
+	shallow := opts.RunMode == RunModeService || opts.RunMode == RunModeSmoke
+	clonePlan := fmt.Sprintf("git clone %s %s", opts.RemoteURL, opts.RepoDir)
+	if shallow {
+		clonePlan = fmt.Sprintf("git clone --depth 1 %s %s", opts.RemoteURL, opts.RepoDir)
+	}
+	result.ClonePlan = append(result.ClonePlan, clonePlan)
+	result.ClonePlan = append(result.ClonePlan, fmt.Sprintf("git -C %s fetch --all --prune", opts.RepoDir))
+}
+
+func cloneOrFetch(result *BootstrapRepoResult, opts BootstrapRepoOptions) error {
 	gitDir := filepath.Join(opts.RepoDir, ".git")
+	shallow := opts.RunMode == RunModeService || opts.RunMode == RunModeSmoke
+
 	if dirExists(gitDir) {
 		result.addCheckoutEvent(eventWithRepo(NewEvent(CodeRepoCheckout, LevelInfo, "fetching latest changes"), opts.Repo))
 		out, err := runCommand(opts.RepoDir, "git", "-C", opts.RepoDir, "fetch", "--all", "--prune")
 		result.addCheckoutOutput(opts.Repo, CodeRepoCheckout, out)
 		if err != nil {
 			result.addCheckoutFailure(opts.Repo, "git fetch --all --prune")
-			return result, err
+			return err
 		}
-	} else {
-		_ = os.Remove(opts.RepoDir)
-		result.addCheckoutEvent(eventWithRepo(NewEvent(CodeRepoClone, LevelInfo, "cloning repository"), opts.Repo))
-		args := []string{"clone"}
-		failLabel := "git clone"
-		if shallow {
-			args = append(args, "--depth", "1")
-			failLabel = "git clone --depth 1"
-		}
-		args = append(args, opts.RemoteURL, opts.RepoDir)
-		out, err := runCommand("", "git", args...)
-		result.addCheckoutOutput(opts.Repo, CodeRepoClone, out)
-		if err != nil {
-			result.addCheckoutFailure(opts.Repo, failLabel)
-			return result, err
-		}
+		return nil
 	}
 
-	if opts.Branch != "" && dirExists(gitDir) {
-		event := eventWithRepo(NewEvent(CodeRepoBranch, LevelInfo, "checking out branch "+opts.Branch), opts.Repo)
-		event.Details = map[string]string{"branch": opts.Branch}
-		result.addBranchEvent(event)
-		out, err := runCommand(opts.RepoDir, "git", "-C", opts.RepoDir, "checkout", "-B", opts.Branch)
-		result.addBranchOutput(opts.Repo, CodeRepoBranch, out)
-		if err != nil {
-			result.addBranchFailure(opts.Repo, fmt.Sprintf("git checkout -B %s", opts.Branch))
-			return result, err
-		}
-		result.BranchReady = fmt.Sprintf("%s:%s", opts.Repo, opts.Branch)
-	} else {
+	_ = os.Remove(opts.RepoDir)
+	result.addCheckoutEvent(eventWithRepo(NewEvent(CodeRepoClone, LevelInfo, "cloning repository"), opts.Repo))
+	args := []string{"clone"}
+	failLabel := "git clone"
+	if shallow {
+		args = append(args, "--depth", "1")
+		failLabel = "git clone --depth 1"
+	}
+	args = append(args, opts.RemoteURL, opts.RepoDir)
+	out, err := runCommand("", "git", args...)
+	result.addCheckoutOutput(opts.Repo, CodeRepoClone, out)
+	if err != nil {
+		result.addCheckoutFailure(opts.Repo, failLabel)
+		return err
+	}
+	return nil
+}
+
+func checkoutBranch(result *BootstrapRepoResult, opts BootstrapRepoOptions) error {
+	gitDir := filepath.Join(opts.RepoDir, ".git")
+	if opts.Branch == "" || !dirExists(gitDir) {
 		result.addBranchWarning(opts.Repo, "branch setup unavailable")
+		return nil
 	}
-
-	if fileExists(filepath.Join(opts.RepoDir, "go.mod")) {
-		if opts.RunMode == RunModeService {
-			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("defer go module bootstrap for service startup: %s", opts.RepoDir))
-			result.addBootstrapWarning(opts.Repo, "defer go module bootstrap to service startup")
-		} else if opts.RunMode == RunModeSmoke {
-			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip go module bootstrap for smoke verification: %s", opts.RepoDir))
-			result.addBootstrapWarning(opts.Repo, "smoke verification skips go module bootstrap")
-		} else {
-			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("go -C %s mod download", opts.RepoDir))
-			if commandExists("go") {
-				result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "downloading Go modules"), opts.Repo))
-				out, err := runCommand(opts.RepoDir, "go", "mod", "download")
-				result.addBootstrapOutput(opts.Repo, out)
-				if err != nil {
-					result.addBootstrapFailure(opts.Repo, "go mod download")
-				}
-			} else {
-				result.addBootstrapWarning(opts.Repo, "go unavailable")
-			}
-		}
+	event := eventWithRepo(NewEvent(CodeRepoBranch, LevelInfo, "checking out branch "+opts.Branch), opts.Repo)
+	event.Details = map[string]string{"branch": opts.Branch}
+	result.addBranchEvent(event)
+	out, err := runCommand(opts.RepoDir, "git", "-C", opts.RepoDir, "checkout", "-B", opts.Branch)
+	result.addBranchOutput(opts.Repo, CodeRepoBranch, out)
+	if err != nil {
+		result.addBranchFailure(opts.Repo, fmt.Sprintf("git checkout -B %s", opts.Branch))
+		return err
 	}
+	result.BranchReady = fmt.Sprintf("%s:%s", opts.Repo, opts.Branch)
+	return nil
+}
 
-	if fileExists(filepath.Join(opts.RepoDir, "pnpm-lock.yaml")) {
-		if opts.RunMode == RunModeService {
-			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("pnpm --store-dir %s --config.state-dir %s --dir %s install --ignore-scripts", pnpmStoreDir(opts.PNPMStoreDir), pnpmStateDir(opts.PNPMStateDir), opts.RepoDir))
-		} else if opts.RunMode == RunModeSmoke {
-			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip pnpm bootstrap for smoke verification: %s", opts.RepoDir))
-		} else {
-			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("pnpm --store-dir %s --config.state-dir %s --dir %s fetch", pnpmStoreDir(opts.PNPMStoreDir), pnpmStateDir(opts.PNPMStateDir), opts.RepoDir))
+func bootstrapGo(result *BootstrapRepoResult, opts BootstrapRepoOptions) {
+	if !fileExists(filepath.Join(opts.RepoDir, "go.mod")) {
+		return
+	}
+	switch opts.RunMode {
+	case RunModeService:
+		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("defer go module bootstrap for service startup: %s", opts.RepoDir))
+		result.addBootstrapWarning(opts.Repo, "defer go module bootstrap to service startup")
+	case RunModeSmoke:
+		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip go module bootstrap for smoke verification: %s", opts.RepoDir))
+		result.addBootstrapWarning(opts.Repo, "smoke verification skips go module bootstrap")
+	default:
+		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("go -C %s mod download", opts.RepoDir))
+		if !commandExists("go") {
+			result.addBootstrapWarning(opts.Repo, "go unavailable")
+			return
 		}
-		if commandExists("pnpm") {
-			_ = cleanupPNPMProjectLinks(pnpmStoreDir(opts.PNPMStoreDir))
-			if opts.RunMode == RunModeService {
-				result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "installing pnpm dependencies"), opts.Repo))
-				out, err := runCommand("", "pnpm", "--store-dir", pnpmStoreDir(opts.PNPMStoreDir), "--config.state-dir="+pnpmStateDir(opts.PNPMStateDir), "--dir", opts.RepoDir, "install", "--ignore-scripts")
-				result.addBootstrapOutput(opts.Repo, out)
-				if err != nil {
-					result.addBootstrapFailure(opts.Repo, "pnpm install --ignore-scripts")
-				}
-			} else if opts.RunMode == RunModeSmoke {
-				result.addBootstrapWarning(opts.Repo, "smoke verification skips pnpm bootstrap")
-			} else {
-				result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "fetching pnpm dependencies"), opts.Repo))
-				out, err := runCommand("", "pnpm", "--store-dir", pnpmStoreDir(opts.PNPMStoreDir), "--config.state-dir="+pnpmStateDir(opts.PNPMStateDir), "--dir", opts.RepoDir, "fetch")
-				result.addBootstrapOutput(opts.Repo, out)
-				if err != nil {
-					result.addBootstrapFailure(opts.Repo, "pnpm fetch")
-				}
-			}
-		} else {
-			result.addBootstrapWarning(opts.Repo, "pnpm unavailable")
-		}
-	} else if fileExists(filepath.Join(opts.RepoDir, "package.json")) {
-		if opts.RunMode == RunModeSmoke {
-			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip pnpm bootstrap for smoke verification: %s", opts.RepoDir))
-			result.addBootstrapWarning(opts.Repo, "smoke verification skips pnpm bootstrap")
-		} else {
-			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("pnpm --store-dir %s --config.state-dir %s --dir %s install --ignore-scripts", pnpmStoreDir(opts.PNPMStoreDir), pnpmStateDir(opts.PNPMStateDir), opts.RepoDir))
-			if commandExists("pnpm") {
-				result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "installing pnpm dependencies"), opts.Repo))
-				_ = cleanupPNPMProjectLinks(pnpmStoreDir(opts.PNPMStoreDir))
-				out, err := runCommand("", "pnpm", "--store-dir", pnpmStoreDir(opts.PNPMStoreDir), "--config.state-dir="+pnpmStateDir(opts.PNPMStateDir), "--dir", opts.RepoDir, "install", "--ignore-scripts")
-				result.addBootstrapOutput(opts.Repo, out)
-				if err != nil {
-					result.addBootstrapFailure(opts.Repo, "pnpm install --ignore-scripts")
-				}
-			} else {
-				result.addBootstrapWarning(opts.Repo, "pnpm unavailable")
-			}
+		result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "downloading Go modules"), opts.Repo))
+		out, err := runCommand(opts.RepoDir, "go", "mod", "download")
+		result.addBootstrapOutput(opts.Repo, out)
+		if err != nil {
+			result.addBootstrapFailure(opts.Repo, "go mod download")
 		}
 	}
+}
 
-	return result, nil
+func bootstrapPNPM(result *BootstrapRepoResult, opts BootstrapRepoOptions) {
+	hasLockfile := fileExists(filepath.Join(opts.RepoDir, "pnpm-lock.yaml"))
+	hasPackageJSON := fileExists(filepath.Join(opts.RepoDir, "package.json"))
+	if !hasLockfile && !hasPackageJSON {
+		return
+	}
+
+	storeDir := pnpmStoreDir(opts.PNPMStoreDir)
+	stateDir := pnpmStateDir(opts.PNPMStateDir)
+
+	if opts.RunMode == RunModeSmoke {
+		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip pnpm bootstrap for smoke verification: %s", opts.RepoDir))
+		if commandExists("pnpm") && hasLockfile {
+			_ = cleanupPNPMProjectLinks(storeDir)
+		}
+		result.addBootstrapWarning(opts.Repo, "smoke verification skips pnpm bootstrap")
+		return
+	}
+
+	// With a lockfile in verify mode, use "fetch" (download only); otherwise "install --ignore-scripts".
+	useFetch := hasLockfile && opts.RunMode == RunModeVerify
+	if useFetch {
+		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("pnpm --store-dir %s --config.state-dir %s --dir %s fetch", storeDir, stateDir, opts.RepoDir))
+	} else {
+		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("pnpm --store-dir %s --config.state-dir %s --dir %s install --ignore-scripts", storeDir, stateDir, opts.RepoDir))
+	}
+
+	if !commandExists("pnpm") {
+		result.addBootstrapWarning(opts.Repo, "pnpm unavailable")
+		return
+	}
+	_ = cleanupPNPMProjectLinks(storeDir)
+
+	args := []string{"--store-dir", storeDir, "--config.state-dir=" + stateDir, "--dir", opts.RepoDir}
+	if useFetch {
+		result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "fetching pnpm dependencies"), opts.Repo))
+		args = append(args, "fetch")
+	} else {
+		result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "installing pnpm dependencies"), opts.Repo))
+		args = append(args, "install", "--ignore-scripts")
+	}
+	out, err := runCommand("", "pnpm", args...)
+	result.addBootstrapOutput(opts.Repo, out)
+	if err != nil {
+		if useFetch {
+			result.addBootstrapFailure(opts.Repo, "pnpm fetch")
+		} else {
+			result.addBootstrapFailure(opts.Repo, "pnpm install --ignore-scripts")
+		}
+	}
 }
 
 func commandExists(name string) bool {

@@ -2,12 +2,10 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -54,34 +52,8 @@ func runServiceMode(ctx context.Context, payload *WorkerPayload, opts RunOptions
 		serviceSpecs[spec.Name] = spec
 	}
 
-	for _, repo := range payload.Repos {
-		spec := repoSpecs[repo]
-		repoDir := spec.Path
-		if strings.TrimSpace(repoDir) == "" {
-			repoDir = filepath.Join(opts.WorkspaceDir, repo)
-		}
-		if err := os.MkdirAll(repoDir, 0o755); err != nil {
-			return fmt.Errorf("mkdir repo dir: %w", err)
-		}
-		appendLine(arts.WorkspaceManifest, repo)
-		result, err := BootstrapRepo(BootstrapRepoOptions{
-			Repo:         repo,
-			RepoDir:      repoDir,
-			RemoteURL:    spec.URL,
-			Branch:       payload.Branch,
-			RunMode:      RunModeService,
-			PNPMStoreDir: os.Getenv("PNPM_STORE_DIR"),
-			PNPMStateDir: os.Getenv("PNPM_STATE_DIR"),
-		})
-		appendLines(arts.ClonePlan, result.ClonePlan)
-		appendLines(arts.CheckoutResult, result.CheckoutOutput)
-		appendLines(arts.BranchResult, result.BranchOutput)
-		appendLines(arts.BootstrapPlan, result.BootstrapPlan)
-		appendBootstrapTimeline(bootstrapResult, repo, repoDir, result)
-		if err != nil {
-			appendLine(arts.CheckoutResult, fmt.Sprintf("FAIL %s: %v", repo, err))
-			return err
-		}
+	if err := bootstrapPayloadRepos(payload, opts.WorkspaceDir, arts, repoSpecs, RunModeService, bootstrapResult); err != nil {
+		return err
 	}
 
 	if len(payload.Services) == 0 {
@@ -241,66 +213,4 @@ func superviseServiceSession(ctx context.Context, payload *WorkerPayload, servic
 		}
 		return nil, err
 	}
-}
-
-func processControlRequests(ctx context.Context, arts workerArtifacts, serviceName, repoDir string, profile RuntimeProfile, serviceURL, readyURL string, readyTimeout time.Duration, target string, commandBuilder func(planFile, target string) []string, serviceResult, mirrordResult, verificationResult *eventLogFile, currentPID *int) error {
-	matches, err := filepath.Glob(filepath.Join(arts.ControlDir, "*.request"))
-	if err != nil {
-		return err
-	}
-	sort.Strings(matches)
-	for _, requestFile := range matches {
-		reqData, err := os.ReadFile(requestFile)
-		if err != nil {
-			return err
-		}
-		var req ControlRequest
-		if err := json.Unmarshal(reqData, &req); err != nil {
-			return err
-		}
-		message, details := describeControlRequest(&req)
-		appendControlTimeline(serviceResult, &req, "received", message, details)
-		resp := ExecuteControl(ctx, &req, ControlExecOptions{
-			Command:      commandBuilder(arts.ServiceStartPlan, target),
-			PIDFile:      arts.ServicePID,
-			ServiceURL:   serviceURL,
-			ReadyURL:     readyURL,
-			ReadyTimeout: readyTimeout,
-			LogFile:      arts.ServiceLog,
-			RepoDir:      repoDir,
-			Profile:      profile,
-		})
-		responseFile := strings.TrimSuffix(requestFile, ".request") + ".response"
-		respData, err := json.Marshal(resp)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(responseFile, respData, 0o644); err != nil {
-			return err
-		}
-		_ = os.Remove(requestFile)
-		if resp.Status == StatusOK {
-			appendControlTimeline(serviceResult, &req, "completed", fmt.Sprintf("%s action completed", req.Action), nil)
-		} else if resp.Error != nil {
-			appendControlTimeline(serviceResult, &req, "failed", resp.Error.Message, map[string]string{"error_code": resp.Error.Code})
-		}
-		if resp.Status == StatusOK && req.Action == ActionRestart {
-			var restartResult RestartActionResult
-			if err := json.Unmarshal(resp.Result, &restartResult); err != nil {
-				return err
-			}
-			*currentPID = restartResult.NewPID
-			if err := writeServiceReady(arts, serviceName, target, serviceURL, readyURL, ProbeResult{
-				StatusCode: restartResult.StatusCode,
-				Headers:    restartResult.ResponseHeaders,
-				Body:       restartResult.ResponseBody,
-			}); err != nil {
-				return err
-			}
-			_ = serviceResult.Append(withService(NewEvent(CodeServiceReady, LevelInfo, readyURL), serviceName, map[string]string{"ready_url": readyURL}))
-			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordExec, LevelInfo, "service readiness probe"), serviceName, nil))
-			_ = verificationResult.Append(withService(NewEvent(CodeVerificationServiceReady, LevelInfo, readyURL), serviceName, map[string]string{"ready_url": readyURL}))
-		}
-	}
-	return nil
 }
