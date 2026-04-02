@@ -9,15 +9,11 @@ import (
 	"strings"
 )
 
-// HashOptions configures a source hash computation.
 type HashOptions struct {
-	RepoDir        string // root directory of the repository
-	RuntimeProfile string // one of: node-http, go-http, worker-metrics, or empty for default
+	RepoDir        string
+	RuntimeProfile RuntimeProfile
 }
 
-// Hash computes a deterministic SHA-256 hash of the source files relevant to
-// the given runtime profile. Returns an empty string when the directory does
-// not exist or no matching files are found.
 func Hash(opts HashOptions) string {
 	if opts.RepoDir == "" {
 		return ""
@@ -27,7 +23,7 @@ func Hash(opts HashOptions) string {
 		return ""
 	}
 
-	files := collectManifest(opts.RepoDir, opts.RuntimeProfile)
+	files := collectManifest(opts.RepoDir, string(opts.RuntimeProfile))
 	if len(files) == 0 {
 		return ""
 	}
@@ -35,7 +31,6 @@ func Hash(opts HashOptions) string {
 	h := sha256.New()
 	for _, f := range files {
 		rel, _ := filepath.Rel(opts.RepoDir, f)
-		// Match shell format: relative-path NUL file-contents NUL
 		h.Write([]byte(rel))
 		h.Write([]byte{0})
 		data, err := os.ReadFile(f)
@@ -51,8 +46,8 @@ func Hash(opts HashOptions) string {
 func collectManifest(repoDir, profile string) []string {
 	var files []string
 
-	switch profile {
-	case "node-http":
+	switch RuntimeProfile(profile) {
+	case ProfileNodeHTTP:
 		srcDir := filepath.Join(repoDir, "src")
 		if info, err := os.Stat(srcDir); err == nil && info.IsDir() {
 			nodeExts := map[string]bool{
@@ -80,7 +75,7 @@ func collectManifest(repoDir, profile string) []string {
 			}
 		}
 
-	case "go-http", "worker-metrics":
+	case ProfileGoHTTP, ProfileWorkerMetrics:
 		goExts := map[string]bool{".go": true}
 		goNames := map[string]bool{"go.mod": true, "go.sum": true}
 		_ = filepath.Walk(repoDir, func(path string, info os.FileInfo, err error) error {
@@ -94,7 +89,6 @@ func collectManifest(repoDir, profile string) []string {
 		})
 
 	default:
-		// Fallback: maxdepth 2
 		_ = filepath.Walk(repoDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return nil

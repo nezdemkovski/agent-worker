@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// SuperviseOptions configures a Supervise call.
 type SuperviseOptions struct {
 	Command      []string
 	ReadyURL     string
@@ -21,18 +20,13 @@ type SuperviseOptions struct {
 	LogFile      string
 }
 
-// SuperviseResult holds the outcome of a successful Supervise call.
 type SuperviseResult struct {
 	PID      int
 	ReadyURL string
 }
 
-// SuperviseError is returned by Supervise on controlled failures.
-// Code is a stable machine-readable identifier for the failure kind:
-//   - "exited_before_ready" — child process exited before HTTP readiness passed
-//   - "timeout"             — readiness polling timed out
 type SuperviseError struct {
-	Code string
+	Code ReasonCode
 	Err  error
 }
 
@@ -40,15 +34,11 @@ func (e *SuperviseError) Error() string {
 	if e.Err != nil {
 		return e.Err.Error()
 	}
-	return e.Code
+	return string(e.Code)
 }
 
 func (e *SuperviseError) Unwrap() error { return e.Err }
 
-// Supervise starts the child process described by opts.Command, waits until its
-// HTTP readiness endpoint responds, and returns. The caller is responsible for
-// terminating the child process afterwards. On failure, Supervise terminates the
-// child before returning.
 func Supervise(ctx context.Context, opts SuperviseOptions) (*SuperviseResult, error) {
 	if len(opts.Command) == 0 {
 		return nil, errors.New("command is required")
@@ -112,7 +102,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (*SuperviseResult, er
 			if err != nil {
 				exitErr = fmt.Errorf("process %d exited before readiness: %w", pid, err)
 			}
-			return nil, &SuperviseError{Code: "exited_before_ready", Err: exitErr}
+			return nil, &SuperviseError{Code: ReasonExitedBeforeReady, Err: exitErr}
 		case <-ticker.C:
 			ready, err := isReady(opts.ReadyURL)
 			if err == nil && ready {
@@ -122,7 +112,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (*SuperviseResult, er
 			_ = terminateProcessTree(pid, 2*time.Second)
 			<-exitCh
 			return nil, &SuperviseError{
-				Code: "timeout",
+				Code: ReasonTimeout,
 				Err:  fmt.Errorf("timeout waiting for readiness at %s", opts.ReadyURL),
 			}
 		case <-ctx.Done():

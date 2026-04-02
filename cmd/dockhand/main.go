@@ -33,8 +33,8 @@ func main() {
 		printUsage()
 		return
 	default:
-		printKV("status", "error")
-		printKV("reason", fmt.Sprintf("unknown subcommand %q", os.Args[1]))
+		printKV(worker.KeyStatus, worker.StatusError)
+		printKV(worker.KeyReason, fmt.Sprintf("unknown subcommand %q", os.Args[1]))
 		os.Exit(2)
 	}
 }
@@ -50,8 +50,8 @@ func runSupervise(args []string) int {
 
 	cmdArgs, err := parseCommandArgs(fs, args)
 	if err != nil {
-		printKV("status", "error")
-		printKV("reason", err.Error())
+		printKV(worker.KeyStatus, worker.StatusError)
+		printKV(worker.KeyReason, err.Error())
 		return 2
 	}
 
@@ -63,18 +63,18 @@ func runSupervise(args []string) int {
 		LogFile:      *logFile,
 	})
 	if err != nil {
-		printKV("status", "error")
+		printKV(worker.KeyStatus, worker.StatusError)
 		var supErr *worker.SuperviseError
 		if errors.As(err, &supErr) {
-			printKV("reason_code", supErr.Code)
+			printKV(worker.KeyReasonCode, string(supErr.Code))
 		}
-		printKV("reason", err.Error())
+		printKV(worker.KeyReason, err.Error())
 		return 1
 	}
 
-	printKV("status", "ok")
-	printKV("pid", fmt.Sprintf("%d", result.PID))
-	printKV("ready_url", result.ReadyURL)
+	printKV(worker.KeyStatus, worker.StatusOK)
+	printKV(worker.KeyPID, fmt.Sprintf("%d", result.PID))
+	printKV(worker.KeyReadyURL, result.ReadyURL)
 	return 0
 }
 
@@ -85,19 +85,19 @@ func runTerminate(args []string) int {
 	pid := fs.Int("pid", 0, "pid to terminate")
 	grace := fs.Duration("grace", 2*time.Second, "grace period before force kill")
 	if err := fs.Parse(args); err != nil {
-		printKV("status", "error")
-		printKV("reason", err.Error())
+		printKV(worker.KeyStatus, worker.StatusError)
+		printKV(worker.KeyReason, err.Error())
 		return 2
 	}
 
 	if err := worker.Terminate(*pid, *grace); err != nil {
-		printKV("status", "error")
-		printKV("reason", err.Error())
+		printKV(worker.KeyStatus, worker.StatusError)
+		printKV(worker.KeyReason, err.Error())
 		return 1
 	}
 
-	printKV("status", "ok")
-	printKV("pid", fmt.Sprintf("%d", *pid))
+	printKV(worker.KeyStatus, worker.StatusOK)
+	printKV(worker.KeyPID, fmt.Sprintf("%d", *pid))
 	return 0
 }
 
@@ -109,26 +109,26 @@ func runMonitor(args []string) int {
 	interval := fs.Duration("interval", 500*time.Millisecond, "polling interval")
 	once := fs.Bool("once", false, "check status once and exit (no polling)")
 	if err := fs.Parse(args); err != nil {
-		printKV("status", "error")
-		printKV("reason", err.Error())
+		printKV(worker.KeyStatus, worker.StatusError)
+		printKV(worker.KeyReason, err.Error())
 		return 2
 	}
 
 	if *once {
 		s := worker.ProcessStatus(*pid)
-		printKV("status", s)
-		printKV("pid", fmt.Sprintf("%d", *pid))
+		printKV(worker.KeyStatus, string(s))
+		printKV(worker.KeyPID, fmt.Sprintf("%d", *pid))
 		return 0
 	}
 
 	if err := worker.Monitor(worker.MonitorOptions{PID: *pid, Interval: *interval}); err != nil {
-		printKV("status", "error")
-		printKV("reason", err.Error())
+		printKV(worker.KeyStatus, worker.StatusError)
+		printKV(worker.KeyReason, err.Error())
 		return 1
 	}
 
-	printKV("status", "gone")
-	printKV("pid", fmt.Sprintf("%d", *pid))
+	printKV(worker.KeyStatus, worker.StatusGone)
+	printKV(worker.KeyPID, fmt.Sprintf("%d", *pid))
 	return 0
 }
 
@@ -139,17 +139,17 @@ func runHash(args []string) int {
 	repoDir := fs.String("repo-dir", "", "repository root directory")
 	profile := fs.String("profile", "", "runtime profile (node-http, go-http, worker-metrics)")
 	if err := fs.Parse(args); err != nil {
-		printKV("status", "error")
-		printKV("reason", err.Error())
+		printKV(worker.KeyStatus, worker.StatusError)
+		printKV(worker.KeyReason, err.Error())
 		return 2
 	}
 
 	hash := worker.Hash(worker.HashOptions{
 		RepoDir:        *repoDir,
-		RuntimeProfile: *profile,
+		RuntimeProfile: worker.RuntimeProfile(*profile),
 	})
-	printKV("status", "ok")
-	printKV("hash", hash)
+	printKV(worker.KeyStatus, worker.StatusOK)
+	printKV(worker.KeyHash, hash)
 	return 0
 }
 
@@ -165,8 +165,8 @@ func runRestart(args []string) int {
 
 	cmdArgs, err := parseCommandArgs(fs, args)
 	if err != nil {
-		printKV("status", "error")
-		printKV("reason", err.Error())
+		printKV(worker.KeyStatus, worker.StatusError)
+		printKV(worker.KeyReason, err.Error())
 		return 2
 	}
 
@@ -179,21 +179,21 @@ func runRestart(args []string) int {
 		Grace:        *grace,
 	})
 	if err != nil {
-		printKV("status", "error")
+		printKV(worker.KeyStatus, worker.StatusError)
 		var supErr *worker.SuperviseError
 		if errors.As(err, &supErr) {
-			printKV("reason_code", supErr.Code)
+			printKV(worker.KeyReasonCode, string(supErr.Code))
 		}
-		printKV("reason", err.Error())
+		printKV(worker.KeyReason, err.Error())
 		return 1
 	}
 
-	printKV("status", "ok")
-	printKV("old_pid", fmt.Sprintf("%d", result.OldPID))
-	printKV("new_pid", fmt.Sprintf("%d", result.NewPID))
-	printKV("ready_url", result.ReadyURL)
-	printKV("old_cmdline", result.OldCmdline)
-	printKV("new_cmdline", result.NewCmdline)
+	printKV(worker.KeyStatus, worker.StatusOK)
+	printKV(worker.KeyOldPID, fmt.Sprintf("%d", result.OldPID))
+	printKV(worker.KeyNewPID, fmt.Sprintf("%d", result.NewPID))
+	printKV(worker.KeyReadyURL, result.ReadyURL)
+	printKV(worker.KeyOldCmdline, result.OldCmdline)
+	printKV(worker.KeyNewCmdline, result.NewCmdline)
 	return 0
 }
 

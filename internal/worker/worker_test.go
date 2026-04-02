@@ -83,8 +83,8 @@ func TestSuperviseFailsWhenProcessExitsBeforeReady(t *testing.T) {
 	if !errors.As(err, &supErr) {
 		t.Fatalf("expected *SuperviseError, got %T: %v", err, err)
 	}
-	if supErr.Code != "exited_before_ready" {
-		t.Fatalf("expected Code %q, got %q", "exited_before_ready", supErr.Code)
+	if supErr.Code != ReasonExitedBeforeReady {
+		t.Fatalf("expected Code %q, got %q", ReasonExitedBeforeReady, supErr.Code)
 	}
 }
 
@@ -104,8 +104,8 @@ func TestSuperviseTimesOutWhenNeverReady(t *testing.T) {
 	if !errors.As(err, &supErr) {
 		t.Fatalf("expected *SuperviseError, got %T: %v", err, err)
 	}
-	if supErr.Code != "timeout" {
-		t.Fatalf("expected Code %q, got %q", "timeout", supErr.Code)
+	if supErr.Code != ReasonTimeout {
+		t.Fatalf("expected Code %q, got %q", ReasonTimeout, supErr.Code)
 	}
 	if !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("expected timeout in error message, got %v", err)
@@ -113,7 +113,7 @@ func TestSuperviseTimesOutWhenNeverReady(t *testing.T) {
 }
 
 func TestTerminateKillsProcessGroup(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		t.Skip("process group assertions are unix-only")
 	}
 	t.Parallel()
@@ -211,7 +211,7 @@ func waitForProcessExit(t *testing.T, pid int, timeout time.Duration) {
 }
 
 func TestMonitorExitsWhenProcessDies(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		t.Skip("process signals are unix-only")
 	}
 	t.Parallel()
@@ -259,7 +259,7 @@ func TestProcessStatusRunning(t *testing.T) {
 	t.Parallel()
 	// Current process is always running.
 	s := ProcessStatus(os.Getpid())
-	if s != "running" {
+	if s != StateRunning {
 		t.Fatalf("expected running for own pid, got %q", s)
 	}
 }
@@ -267,7 +267,7 @@ func TestProcessStatusRunning(t *testing.T) {
 func TestProcessStatusGone(t *testing.T) {
 	t.Parallel()
 	s := ProcessStatus(999999999)
-	if s != "gone" {
+	if s != StateGone {
 		t.Fatalf("expected gone for dead pid, got %q", s)
 	}
 }
@@ -275,13 +275,13 @@ func TestProcessStatusGone(t *testing.T) {
 func TestProcessStatusInvalidPID(t *testing.T) {
 	t.Parallel()
 	s := ProcessStatus(0)
-	if s != "gone" {
+	if s != StateGone {
 		t.Fatalf("expected gone for pid 0, got %q", s)
 	}
 }
 
 func TestRestartTerminatesOldAndStartsNew(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		t.Skip("process group assertions are unix-only")
 	}
 	t.Parallel()
@@ -391,8 +391,8 @@ func TestRestartFailsWhenNewProcessExitsBeforeReady(t *testing.T) {
 	if !errors.As(err, &supErr) {
 		t.Fatalf("expected *SuperviseError, got %T: %v", err, err)
 	}
-	if supErr.Code != "exited_before_ready" {
-		t.Fatalf("expected Code %q, got %q", "exited_before_ready", supErr.Code)
+	if supErr.Code != ReasonExitedBeforeReady {
+		t.Fatalf("expected Code %q, got %q", ReasonExitedBeforeReady, supErr.Code)
 	}
 }
 
@@ -403,13 +403,13 @@ func TestHashGoProfile(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("readme\n"), 0o644)
 
-	h := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+	h := Hash(HashOptions{RepoDir: dir, RuntimeProfile: ProfileGoHTTP})
 	if h == "" {
 		t.Fatal("expected non-empty hash for go-http profile")
 	}
 
 	// README.md shouldn't affect hash
-	h2 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+	h2 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: ProfileGoHTTP})
 	if h != h2 {
 		t.Fatal("hash should be deterministic")
 	}
@@ -423,7 +423,7 @@ func TestHashNodeProfile(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "Makefile"), []byte("all:\n"), 0o644)
 
-	h := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "node-http"})
+	h := Hash(HashOptions{RepoDir: dir, RuntimeProfile: ProfileNodeHTTP})
 	if h == "" {
 		t.Fatal("expected non-empty hash for node-http profile")
 	}
@@ -445,7 +445,7 @@ func TestHashDefaultProfile(t *testing.T) {
 
 func TestHashEmptyDir(t *testing.T) {
 	t.Parallel()
-	h := Hash(HashOptions{RepoDir: t.TempDir(), RuntimeProfile: "go-http"})
+	h := Hash(HashOptions{RepoDir: t.TempDir(), RuntimeProfile: ProfileGoHTTP})
 	if h != "" {
 		t.Fatalf("expected empty hash for dir with no matching files, got %q", h)
 	}
@@ -466,8 +466,8 @@ func TestHashDeterministic(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package b\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
 
-	h1 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
-	h2 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+	h1 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: ProfileGoHTTP})
+	h2 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: ProfileGoHTTP})
 	if h1 != h2 {
 		t.Fatalf("hash not deterministic: %q != %q", h1, h2)
 	}
@@ -478,10 +478,10 @@ func TestHashChangesWhenContentChanges(t *testing.T) {
 	dir := t.TempDir()
 	goFile := filepath.Join(dir, "main.go")
 	os.WriteFile(goFile, []byte("package main\n"), 0o644)
-	h1 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+	h1 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: ProfileGoHTTP})
 
 	os.WriteFile(goFile, []byte("package main\nfunc init() {}\n"), 0o644)
-	h2 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+	h2 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: ProfileGoHTTP})
 
 	if h1 == h2 {
 		t.Fatal("hash should change when file content changes")
