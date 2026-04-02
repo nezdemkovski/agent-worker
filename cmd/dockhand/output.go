@@ -36,12 +36,14 @@ type hashResponse struct {
 }
 
 type restartResponse struct {
-	Status     string `json:"status"`
-	OldPID     int    `json:"old_pid,omitempty"`
-	NewPID     int    `json:"new_pid,omitempty"`
-	ReadyURL   string `json:"ready_url,omitempty"`
-	OldCmdline string `json:"old_cmdline,omitempty"`
-	NewCmdline string `json:"new_cmdline,omitempty"`
+	Status        string `json:"status"`
+	OldPID        int    `json:"old_pid,omitempty"`
+	NewPID        int    `json:"new_pid,omitempty"`
+	ReadyURL      string `json:"ready_url,omitempty"`
+	OldCmdline    string `json:"old_cmdline,omitempty"`
+	NewCmdline    string `json:"new_cmdline,omitempty"`
+	OldSourceHash string `json:"old_source_hash,omitempty"`
+	NewSourceHash string `json:"new_source_hash,omitempty"`
 }
 
 func emitJSON(v any) {

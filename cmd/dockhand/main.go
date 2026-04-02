@@ -189,6 +189,8 @@ func runRestart(args []string) int {
 	readyTimeout := fs.Duration("ready-timeout", 30*time.Second, "maximum readiness wait time")
 	logFile := fs.String("log-file", "", "path to append child stdout/stderr")
 	grace := fs.Duration("grace", 5*time.Second, "grace period for old process termination")
+	repoDir := fs.String("repo-dir", "", "repository root directory for source hashing")
+	profile := fs.String("profile", "", "runtime profile for source hashing")
 
 	cmdArgs, err := parseCommandArgs(fs, args)
 	if err != nil {
@@ -206,6 +208,8 @@ func runRestart(args []string) int {
 		ReadyTimeout: *readyTimeout,
 		LogFile:      *logFile,
 		Grace:        *grace,
+		RepoDir:      *repoDir,
+		Profile:      worker.RuntimeProfile(*profile),
 	})
 	if err != nil {
 		response := errorResponse{
@@ -221,12 +225,14 @@ func runRestart(args []string) int {
 	}
 
 	emitJSON(restartResponse{
-		Status:     worker.StatusOK,
-		OldPID:     result.OldPID,
-		NewPID:     result.NewPID,
-		ReadyURL:   result.ReadyURL,
-		OldCmdline: result.OldCmdline,
-		NewCmdline: result.NewCmdline,
+		Status:        worker.StatusOK,
+		OldPID:        result.OldPID,
+		NewPID:        result.NewPID,
+		ReadyURL:      result.ReadyURL,
+		OldCmdline:    result.OldCmdline,
+		NewCmdline:    result.NewCmdline,
+		OldSourceHash: result.OldSourceHash,
+		NewSourceHash: result.NewSourceHash,
 	})
 	return 0
 }

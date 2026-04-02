@@ -15,14 +15,18 @@ type RestartOptions struct {
 	ReadyTimeout time.Duration
 	LogFile      string
 	Grace        time.Duration
+	RepoDir      string
+	Profile      RuntimeProfile
 }
 
 type RestartResult struct {
-	OldPID     int
-	NewPID     int
-	ReadyURL   string
-	OldCmdline string
-	NewCmdline string
+	OldPID         int
+	NewPID         int
+	ReadyURL       string
+	OldCmdline     string
+	NewCmdline     string
+	OldSourceHash  string
+	NewSourceHash  string
 }
 
 func Restart(ctx context.Context, opts RestartOptions) (*RestartResult, error) {
@@ -32,6 +36,10 @@ func Restart(ctx context.Context, opts RestartOptions) (*RestartResult, error) {
 
 	oldPID := readPIDFile(opts.PIDFile)
 	oldCmdline := pidCmdline(oldPID)
+	oldSourceHash := Hash(HashOptions{
+		RepoDir:        opts.RepoDir,
+		RuntimeProfile: opts.Profile,
+	})
 	if oldPID > 0 {
 		_ = terminateProcessTree(oldPID, opts.Grace)
 	}
@@ -48,11 +56,16 @@ func Restart(ctx context.Context, opts RestartOptions) (*RestartResult, error) {
 	}
 
 	return &RestartResult{
-		OldPID:     oldPID,
-		NewPID:     result.PID,
-		ReadyURL:   result.ReadyURL,
-		OldCmdline: oldCmdline,
-		NewCmdline: pidCmdline(result.PID),
+		OldPID:        oldPID,
+		NewPID:        result.PID,
+		ReadyURL:      result.ReadyURL,
+		OldCmdline:    oldCmdline,
+		NewCmdline:    pidCmdline(result.PID),
+		OldSourceHash: oldSourceHash,
+		NewSourceHash: Hash(HashOptions{
+			RepoDir:        opts.RepoDir,
+			RuntimeProfile: opts.Profile,
+		}),
 	}, nil
 }
 

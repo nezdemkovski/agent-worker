@@ -340,6 +340,47 @@ func TestRestartTerminatesOldAndStartsNew(t *testing.T) {
 	}
 }
 
+func TestRestartReturnsSourceHashesWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "service.pid")
+	repoDir := filepath.Join(tmpDir, "repo")
+	srcDir := filepath.Join(repoDir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "index.ts"), []byte("console.log('hi')\n"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+
+	readyURL := helperReadyURL(t)
+	result, err := Restart(context.Background(), RestartOptions{
+		PIDFile:      pidFile,
+		Command:      helperCommand("serve", readyURL),
+		ReadyURL:     readyURL,
+		ReadyTimeout: 5 * time.Second,
+		RepoDir:      repoDir,
+		Profile:      ProfileNodeHTTP,
+	})
+	if err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+	if result.OldSourceHash == "" || result.NewSourceHash == "" {
+		t.Fatalf("expected non-empty source hashes, got old=%q new=%q", result.OldSourceHash, result.NewSourceHash)
+	}
+	if result.OldSourceHash != result.NewSourceHash {
+		t.Fatalf("expected unchanged source hash across restart, got old=%q new=%q", result.OldSourceHash, result.NewSourceHash)
+	}
+
+	if err := Terminate(result.NewPID, 2*time.Second); err != nil {
+		t.Logf("terminate new process: %v", err)
+	}
+}
+
 func TestRestartWhenOldProcessAlreadyDead(t *testing.T) {
 	t.Parallel()
 
