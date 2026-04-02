@@ -60,6 +60,18 @@ type startPlanResponse struct {
 	Plan             *worker.TypedStartPlan `json:"plan,omitempty"`
 }
 
+type bootstrapRepoResponse struct {
+	Status          string   `json:"status"`
+	Reason          string   `json:"reason,omitempty"`
+	ClonePlan       []string `json:"clone_plan,omitempty"`
+	CheckoutResult  []string `json:"checkout_result,omitempty"`
+	BranchResult    []string `json:"branch_result,omitempty"`
+	BootstrapPlan   []string `json:"bootstrap_plan,omitempty"`
+	BootstrapResult []string `json:"bootstrap_result,omitempty"`
+	BranchReady     string   `json:"branch_ready,omitempty"`
+	PreparedRepo    string   `json:"prepared_repo,omitempty"`
+}
+
 func emitJSON(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {

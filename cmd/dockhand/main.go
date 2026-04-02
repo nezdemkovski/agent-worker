@@ -20,6 +20,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "bootstrap-repo":
+		os.Exit(runBootstrapRepo(os.Args[2:]))
 	case "exec-plan":
 		os.Exit(runExecPlan(os.Args[2:]))
 	case "plan-start":
@@ -44,6 +46,59 @@ func main() {
 		})
 		os.Exit(2)
 	}
+}
+
+func runBootstrapRepo(args []string) int {
+	fs := flag.NewFlagSet("bootstrap-repo", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+
+	repo := fs.String("repo", "", "repo name")
+	repoDir := fs.String("repo-dir", "", "repo checkout path")
+	remoteURL := fs.String("remote-url", "", "remote clone url")
+	branch := fs.String("branch", "", "branch to checkout")
+	runMode := fs.String("run-mode", "", "run mode")
+	pnpmStoreDir := fs.String("pnpm-store-dir", "", "pnpm store dir")
+	pnpmStateDir := fs.String("pnpm-state-dir", "", "pnpm state dir")
+	if err := fs.Parse(args); err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		return 2
+	}
+
+	result, err := worker.BootstrapRepo(worker.BootstrapRepoOptions{
+		Repo:         *repo,
+		RepoDir:      *repoDir,
+		RemoteURL:    *remoteURL,
+		Branch:       *branch,
+		RunMode:      worker.RunMode(*runMode),
+		PNPMStoreDir: *pnpmStoreDir,
+		PNPMStateDir: *pnpmStateDir,
+	})
+	if err != nil {
+		emitJSON(bootstrapRepoResponse{
+			Status:          worker.StatusError,
+			Reason:          err.Error(),
+			ClonePlan:       result.ClonePlan,
+			CheckoutResult:  result.CheckoutResult,
+			BranchResult:    result.BranchResult,
+			BootstrapPlan:   result.BootstrapPlan,
+			BootstrapResult: result.BootstrapResult,
+			BranchReady:     result.BranchReady,
+			PreparedRepo:    result.PreparedRepo,
+		})
+		return 1
+	}
+
+	emitJSON(bootstrapRepoResponse{
+		Status:          worker.StatusOK,
+		ClonePlan:       result.ClonePlan,
+		CheckoutResult:  result.CheckoutResult,
+		BranchResult:    result.BranchResult,
+		BootstrapPlan:   result.BootstrapPlan,
+		BootstrapResult: result.BootstrapResult,
+		BranchReady:     result.BranchReady,
+		PreparedRepo:    result.PreparedRepo,
+	})
+	return 0
 }
 
 func runPlanStart(args []string) int {
