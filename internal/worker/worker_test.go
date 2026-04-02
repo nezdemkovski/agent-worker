@@ -255,6 +255,31 @@ func TestMonitorReturnsImmediatelyForDeadPID(t *testing.T) {
 	}
 }
 
+func TestProcessStatusRunning(t *testing.T) {
+	t.Parallel()
+	// Current process is always running.
+	s := ProcessStatus(os.Getpid())
+	if s != "running" {
+		t.Fatalf("expected running for own pid, got %q", s)
+	}
+}
+
+func TestProcessStatusGone(t *testing.T) {
+	t.Parallel()
+	s := ProcessStatus(999999999)
+	if s != "gone" {
+		t.Fatalf("expected gone for dead pid, got %q", s)
+	}
+}
+
+func TestProcessStatusInvalidPID(t *testing.T) {
+	t.Parallel()
+	s := ProcessStatus(0)
+	if s != "gone" {
+		t.Fatalf("expected gone for pid 0, got %q", s)
+	}
+}
+
 func TestRestartTerminatesOldAndStartsNew(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("process group assertions are unix-only")

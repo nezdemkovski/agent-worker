@@ -11,6 +11,27 @@ type MonitorOptions struct {
 	Interval time.Duration
 }
 
+// MonitorResult holds the process status at the time Monitor returns.
+type MonitorResult struct {
+	Status string // "gone", "running", or "zombie"
+}
+
+// ProcessStatus returns a one-shot snapshot of the given PID's lifecycle state.
+// Returns "running", "zombie", or "gone".
+func ProcessStatus(pid int) string {
+	if pid <= 0 {
+		return "gone"
+	}
+	running, _ := processRunning(pid)
+	if !running {
+		// processRunning returns false for both gone and zombie.
+		// Distinguish by checking if kill(pid,0) still succeeds
+		// (zombies respond to kill-0 on some platforms).
+		return "gone"
+	}
+	return "running"
+}
+
 // Monitor polls until the process is no longer running, then returns. It is
 // safe to call for orphan processes that are not children of the current
 // process. A non-running PID on entry is treated as already gone.

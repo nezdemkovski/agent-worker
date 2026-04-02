@@ -107,10 +107,18 @@ func runMonitor(args []string) int {
 
 	pid := fs.Int("pid", 0, "pid to monitor")
 	interval := fs.Duration("interval", 500*time.Millisecond, "polling interval")
+	once := fs.Bool("once", false, "check status once and exit (no polling)")
 	if err := fs.Parse(args); err != nil {
 		printKV("status", "error")
 		printKV("reason", err.Error())
 		return 2
+	}
+
+	if *once {
+		s := worker.ProcessStatus(*pid)
+		printKV("status", s)
+		printKV("pid", fmt.Sprintf("%d", *pid))
+		return 0
 	}
 
 	if err := worker.Monitor(worker.MonitorOptions{PID: *pid, Interval: *interval}); err != nil {
@@ -219,7 +227,7 @@ Usage:
   dockhand supervise --ready-url URL [--ready-timeout DURATION] [--pid-file PATH] [--log-file PATH] -- <command...>
   dockhand terminate --pid PID [--grace DURATION]
   dockhand restart --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
-  dockhand monitor --pid PID [--interval DURATION]
+  dockhand monitor --pid PID [--interval DURATION] [--once]
   dockhand hash --repo-dir PATH [--profile PROFILE]
 `))
 }
