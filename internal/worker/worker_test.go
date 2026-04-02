@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -427,6 +429,15 @@ func TestHashNodeProfile(t *testing.T) {
 	if h == "" {
 		t.Fatal("expected non-empty hash for node-http profile")
 	}
+
+	expectedFiles := []string{
+		filepath.Join(dir, "package.json"),
+		filepath.Join(dir, "src", "index.ts"),
+	}
+	sort.Strings(expectedFiles)
+	if h != testExpectedManifestHash(t, dir, expectedFiles) {
+		t.Fatalf("unexpected node-http hash: got %q", h)
+	}
 }
 
 func TestHashDefaultProfile(t *testing.T) {
@@ -486,6 +497,27 @@ func TestHashChangesWhenContentChanges(t *testing.T) {
 	if h1 == h2 {
 		t.Fatal("hash should change when file content changes")
 	}
+}
+
+func testExpectedManifestHash(t *testing.T, repoDir string, files []string) string {
+	t.Helper()
+
+	h := sha256.New()
+	for _, f := range files {
+		rel, err := filepath.Rel(repoDir, f)
+		if err != nil {
+			t.Fatalf("filepath.Rel(%q, %q): %v", repoDir, f, err)
+		}
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("os.ReadFile(%q): %v", f, err)
+		}
+		h.Write([]byte(rel))
+		h.Write([]byte{0})
+		h.Write(data)
+		h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func TestWorkerHelperProcess(t *testing.T) {
