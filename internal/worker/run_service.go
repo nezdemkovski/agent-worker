@@ -113,15 +113,15 @@ func runServiceMode(ctx context.Context, payload *WorkerPayload, opts RunOptions
 	if err := os.WriteFile(arts.ServiceStartPlan, []byte(planJSON), 0o644); err != nil {
 		return fmt.Errorf("write service start plan: %w", err)
 	}
-	appendLine(arts.MirrordPlan, fmt.Sprintf("mirrord exec --target %s -- dockhand exec-plan --plan-file %s", target, arts.ServiceStartPlan))
-	_ = serviceResult.Append(withService(NewEvent(CodeServiceStart, LevelInfo, "mirrord-backed local service on "+serviceURL), serviceName, map[string]string{"url": serviceURL, "target": target}))
+	appendLine(arts.MirrordPlan, fmt.Sprintf("mirrord exec --target %s -- dobby exec-plan --plan-file %s", target, arts.ServiceStartPlan))
+	_ = serviceResult.Append(withService(NewEvent(CodeServiceStart, LevelInfo, "Dobby starts the service on "+serviceURL+". Dobby will not let master down!"), serviceName, map[string]string{"url": serviceURL, "target": target}))
 	_ = serviceResult.Append(withService(NewEvent(CodeServiceStartStrategy, LevelInfo, plan.Strategy), serviceName, nil))
 	_ = serviceResult.Append(withService(NewEvent(CodeServiceStartCommand, LevelInfo, plan.Description), serviceName, nil))
 
 	commandBuilder := opts.PlanCommandBuilder
 	if commandBuilder == nil {
 		commandBuilder = func(planFile, target string) []string {
-			return []string{"mirrord", "exec", "--target", target, "--", "dockhand", "exec-plan", "--plan-file", planFile}
+			return []string{"mirrord", "exec", "--target", target, "--", "dobby", "exec-plan", "--plan-file", planFile}
 		}
 	}
 	command := commandBuilder(arts.ServiceStartPlan, target)
@@ -170,7 +170,7 @@ func runServiceMode(ctx context.Context, payload *WorkerPayload, opts RunOptions
 			continue
 		}
 		if ProcessStatus(currentPID) != StateRunning {
-			_ = serviceResult.Append(withService(NewEvent(CodeServiceSessionFail, LevelError, fmt.Sprintf("process %d exited unexpectedly", currentPID)), serviceName, map[string]string{"pid": fmt.Sprintf("%d", currentPID)}))
+			_ = serviceResult.Append(withService(NewEvent(CodeServiceSessionFail, LevelError, fmt.Sprintf("Bad Dobby! Process %d has died, sir!", currentPID)), serviceName, map[string]string{"pid": fmt.Sprintf("%d", currentPID)}))
 			_ = verificationResult.Append(NewEvent(CodeVerificationSessionFail, LevelError, "process exited unexpectedly"))
 			_ = mirrordResult.Append(NewEvent(CodeMirrordSessionFail, LevelError, "process exited unexpectedly"))
 			return fmt.Errorf("process %d exited unexpectedly", currentPID)
@@ -196,18 +196,18 @@ func superviseServiceSession(ctx context.Context, payload *WorkerPayload, servic
 		var supErr *SuperviseError
 		if errors.As(err, &supErr) && supErr.Code == ReasonExitedBeforeReady {
 			if !retriedRecovery && isDirtyIptablesLog(arts.ServiceLog) {
-				_ = serviceResult.Append(withService(NewEvent(CodeServiceRecover, LevelWarn, "detected dirty mirrord iptables state"), serviceName, nil))
+				_ = serviceResult.Append(withService(NewEvent(CodeServiceRecover, LevelWarn, "Dobby sees dirty iptables, sir. Dobby will try to fix it"), serviceName, nil))
 				if recoverMirrordTarget(ctx, payload.Namespace, serviceName, target, arts.ServiceLog, serviceResult) {
 					retriedRecovery = true
 					continue
 				}
-				_ = serviceResult.Append(withService(NewEvent(CodeServiceRecoverFail, LevelError, "automatic mirrord target recovery failed"), serviceName, nil))
+				_ = serviceResult.Append(withService(NewEvent(CodeServiceRecoverFail, LevelError, "Dobby tried, sir, but the recovery has failed. Dobby will iron his hands later"), serviceName, nil))
 			}
-			_ = serviceResult.Append(withService(NewEvent(CodeServiceExitedBeforeReady, LevelError, "service process exited before readiness probe passed"), serviceName, nil))
+			_ = serviceResult.Append(withService(NewEvent(CodeServiceExitedBeforeReady, LevelError, "Dobby's service has died before it was ready, sir! *slams oven door on hands*"), serviceName, nil))
 			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, LevelError, "service process exited before readiness"), serviceName, nil))
 			_ = verificationResult.Append(withService(NewEvent(CodeVerificationFail, LevelError, "service process exited before readiness"), serviceName, nil))
 		} else {
-			_ = serviceResult.Append(withService(NewEvent(CodeServiceReadyTimeout, LevelError, "service did not become ready at "+readyURL), serviceName, nil))
+			_ = serviceResult.Append(withService(NewEvent(CodeServiceReadyTimeout, LevelError, "Dobby waited and waited, but the service refuses to wake at "+readyURL+", sir"), serviceName, nil))
 			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, LevelError, "service readiness probe"), serviceName, nil))
 			_ = verificationResult.Append(withService(NewEvent(CodeVerificationFail, LevelError, "service did not become ready"), serviceName, nil))
 		}

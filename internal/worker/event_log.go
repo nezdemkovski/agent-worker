@@ -112,7 +112,7 @@ func formatEventLogLine(event Event) string {
 	case event.Repo != "":
 		scope = fmt.Sprintf("repo %s", event.Repo)
 	case scope == "":
-		scope = "worker"
+		scope = "dobby"
 	}
 
 	line := fmt.Sprintf("%s [%s] %s: %s", event.Time, event.Level, scope, event.Message)

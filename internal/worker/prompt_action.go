@@ -34,7 +34,7 @@ func RunPromptAction(ctx context.Context, payload PromptActionPayload) (*PromptA
 		if err := ensureCodexLogin(ctx); err != nil {
 			return nil, err
 		}
-		outputFile := filepath.Join(os.TempDir(), "dockhand-codex-output-"+result.PromptSHA256)
+		outputFile := filepath.Join(os.TempDir(), "dobby-codex-output-"+result.PromptSHA256)
 		defer os.Remove(outputFile)
 		result.Command = []string{"codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-C", repoDir, "-o", outputFile}
 		runResult, err := RunCommand(ctx, repoDir, nil, payload.Prompt, "codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-C", repoDir, "-o", outputFile)

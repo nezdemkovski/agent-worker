@@ -43,7 +43,7 @@ func runControl(args []string) int {
 		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("parse request: %v", err)})
 		return 1
 	}
-	command := []string{"mirrord", "exec", "--target", *mirrordTarget, "--", "dockhand", "exec-plan", "--plan-file", *planFile}
+	command := []string{"mirrord", "exec", "--target", *mirrordTarget, "--", "dobby", "exec-plan", "--plan-file", *planFile}
 	resp := worker.ExecuteControl(context.Background(), &req, worker.ControlExecOptions{
 		Command:      command,
 		PIDFile:      *pidFile,

@@ -48,10 +48,10 @@ exit 0
 	if !strings.Contains(result.ClonePlan[0], "git clone --depth 1") {
 		t.Fatalf("expected shallow clone plan, got %q", result.ClonePlan[0])
 	}
-	if !containsEvent(result.CheckoutEvents, CodeRepoClone, LevelInfo, "cloning repository") {
+	if !containsEvent(result.CheckoutEvents, CodeRepoClone, LevelInfo, "Dobby is honored to clone the repository, sir") {
 		t.Fatalf("expected clone event, got %+v", result.CheckoutEvents)
 	}
-	if !containsEvent(result.BranchEvents, CodeRepoBranch, LevelInfo, "checking out branch agent/test-branch") {
+	if !containsEvent(result.BranchEvents, CodeRepoBranch, LevelInfo, "Dobby switches to branch agent/test-branch, sir") {
 		t.Fatalf("expected branch event, got %+v", result.BranchEvents)
 	}
 	if result.BranchReady != "repo1:agent/test-branch" {
@@ -114,10 +114,10 @@ exit 0
 		t.Fatalf("BootstrapRepo() error = %v", err)
 	}
 
-	if !containsEvent(result.BootstrapEvents, CodeRepoBootstrap, LevelInfo, "downloading Go modules") {
+	if !containsEvent(result.BootstrapEvents, CodeRepoBootstrap, LevelInfo, "Dobby fetches the Go modules. Dobby is a good elf!") {
 		t.Fatalf("expected go bootstrap event, got %+v", result.BootstrapEvents)
 	}
-	if !containsEvent(result.BootstrapEvents, CodeRepoBootstrap, LevelInfo, "fetching pnpm dependencies") {
+	if !containsEvent(result.BootstrapEvents, CodeRepoBootstrap, LevelInfo, "Dobby fetches pnpm dependencies, sir. Dobby does not complain") {
 		t.Fatalf("expected pnpm fetch event, got %+v", result.BootstrapEvents)
 	}
 	if dirEntries, _ := os.ReadDir(filepath.Join(pnpmStore, "v3", "projects")); len(dirEntries) != 0 {

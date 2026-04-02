@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`agent-worker` — a standalone container image for in-cluster coding-agent jobs. The core is `dockhand`, a Go CLI that supervises, terminates, restarts, monitors, and fingerprints processes with JSON-only output.
+`agent-worker` — a standalone container image for in-cluster coding-agent jobs. The core is `dobby`, a Go CLI that supervises, terminates, restarts, monitors, and fingerprints processes with JSON-only output.
 
 Published to `ghcr.io/nezdemkovski/agent-worker`.
 
@@ -18,7 +18,7 @@ go test ./...
 go test ./internal/worker -run TestSuperviseSucceedsAndWritesArtifacts
 
 # Build the binary locally
-go build -o dockhand ./cmd/dockhand
+go build -o dobby ./cmd/dobby
 
 # Build the Docker image locally
 ./scripts/build.sh agent-worker:dev
@@ -27,7 +27,7 @@ go build -o dockhand ./cmd/dockhand
 ## Architecture
 
 ```
-cmd/dockhand/
+cmd/dobby/
   main.go       — CLI entry point: flag parsing + subcommand dispatch
   output.go     — JSON response types (EmitSuccess, EmitError)
 
@@ -67,4 +67,4 @@ GitHub Actions (`.github/workflows/publish.yml`) builds and pushes a multi-arch 
 
 ## Container Image Contents
 
-The final image (based on `node:24.14.0-bookworm-slim`) includes: kubectl, mirrord, air (Go hot-reload), pnpm, Claude Code CLI, Codex CLI, and the `dockhand` binary at `/out/dockhand`.
+The final image (based on `node:24.14.0-bookworm-slim`) includes: kubectl, mirrord, air (Go hot-reload), pnpm, Claude Code CLI, Codex CLI, and the `dobby` binary at `/out/dobby`.

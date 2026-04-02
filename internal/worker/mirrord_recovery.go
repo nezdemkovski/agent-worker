@@ -27,21 +27,21 @@ func recoverMirrordTarget(ctx context.Context, namespace, service, target, logFi
 		return false
 	}
 
-	_ = serviceResult.Append(withService(NewEvent(CodeServiceRecover, LevelInfo, "delete pods for "+deploymentName), service, nil))
+	_ = serviceResult.Append(withService(NewEvent(CodeServiceRecover, LevelInfo, "Dobby kills the bad pods for "+deploymentName+", sir"), service, nil))
 	deleteResult, err := RunCommand(ctx, "", nil, "", "kubectl", "-n", namespace, "delete", "pod", "-l", "app="+deploymentName, "--wait=false")
 	appendCommandResult(logFile, deleteResult)
 	if err != nil {
-		_ = serviceResult.Append(withService(NewEvent(CodeServiceRecoverFail, LevelError, "automatic mirrord target recovery failed"), service, nil))
+		_ = serviceResult.Append(withService(NewEvent(CodeServiceRecoverFail, LevelError, "Dobby has failed the recovery, sir. Dobby is most ashamed"), service, nil))
 		return false
 	}
 
-	_ = serviceResult.Append(withService(NewEvent(CodeServiceRecover, LevelInfo, "wait for deployment/"+deploymentName+" rollout"), service, nil))
+	_ = serviceResult.Append(withService(NewEvent(CodeServiceRecover, LevelInfo, "Dobby waits for deployment/"+deploymentName+" to come back, sir"), service, nil))
 	rolloutCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	rolloutResult, err := RunCommand(rolloutCtx, "", nil, "", "kubectl", "-n", namespace, "rollout", "status", "deployment/"+deploymentName, "--timeout=120s")
 	appendCommandResult(logFile, rolloutResult)
 	if err != nil {
-		_ = serviceResult.Append(withService(NewEvent(CodeServiceRecoverFail, LevelError, "automatic mirrord target recovery failed"), service, nil))
+		_ = serviceResult.Append(withService(NewEvent(CodeServiceRecoverFail, LevelError, "Dobby has failed the recovery, sir. Dobby is most ashamed"), service, nil))
 		return false
 	}
 	return true

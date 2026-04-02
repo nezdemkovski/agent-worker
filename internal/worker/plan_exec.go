@@ -117,7 +117,7 @@ func ExecPlan(plan *TypedStartPlan) error {
 	for i, step := range plan.Steps {
 		if err := ExecStep(step, plan.Env, plan.Workdir); err != nil {
 			if len(plan.Fallback) > 0 {
-				fmt.Fprintf(os.Stderr, "[dockhand] step %d failed, switching to fallback: %v\n", i, err)
+				fmt.Fprintf(os.Stderr, "[dobby] step %d failed, sir! Dobby tries the fallback: %v\n", i, err)
 				return execFallback(plan)
 			}
 			return fmt.Errorf("step %d failed: %w", i, err)

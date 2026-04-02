@@ -55,7 +55,7 @@ func TestEmitRunPreludeIncludesRunMetadata(t *testing.T) {
 
 	for _, expected := range []string{
 		"RUN_START run-123",
-		"Starting run run-123 in service mode",
+		"Dobby is starting run run-123 in service mode",
 		"Session: session-456",
 		"Payload file: /tmp/run.json",
 		"Workspace dir: /workspace",

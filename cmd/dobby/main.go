@@ -51,16 +51,16 @@ func main() {
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, strings.TrimSpace(`
-dockhand is a small process supervisor for agent-worker images.
+dobby is a small process supervisor for agent-worker images.
 
 Usage:
-  dockhand run --payload-file PATH --workspace-dir PATH --artifacts-dir PATH
-  dockhand exec-plan [--plan-file PATH] (reads plan JSON from stdin or file, executes it)
-  dockhand supervise --ready-url URL [--ready-timeout DURATION] [--pid-file PATH] [--log-file PATH] -- <command...>
-  dockhand terminate --pid PID [--grace DURATION]
-  dockhand restart --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
-  dockhand monitor --pid PID [--interval DURATION] [--once]
-  dockhand hash --repo-dir PATH [--profile PROFILE]
-  dockhand control --request-file PATH --response-file PATH [--pid-file PATH] [--ready-url URL] [--mirrord-target TARGET] [--plan-file PATH]
+  dobby run --payload-file PATH --workspace-dir PATH --artifacts-dir PATH
+  dobby exec-plan [--plan-file PATH] (reads plan JSON from stdin or file, executes it)
+  dobby supervise --ready-url URL [--ready-timeout DURATION] [--pid-file PATH] [--log-file PATH] -- <command...>
+  dobby terminate --pid PID [--grace DURATION]
+  dobby restart --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
+  dobby monitor --pid PID [--interval DURATION] [--once]
+  dobby hash --repo-dir PATH [--profile PROFILE]
+  dobby control --request-file PATH --response-file PATH [--pid-file PATH] [--ready-url URL] [--mirrord-target TARGET] [--plan-file PATH]
 `))
 }

@@ -91,7 +91,7 @@ func cloneOrFetch(result *BootstrapRepoResult, opts BootstrapRepoOptions) error 
 
 	co := result.checkout()
 	if dirExists(gitDir) {
-		co.event(eventWithRepo(NewEvent(CodeRepoCheckout, LevelInfo, "fetching latest changes"), opts.Repo))
+		co.event(eventWithRepo(NewEvent(CodeRepoCheckout, LevelInfo, "Dobby must fetch the latest changes, sir"), opts.Repo))
 		out, err := runLines(context.Background(), opts.RepoDir, nil, "git", "-C", opts.RepoDir, "fetch", "--all", "--prune")
 		co.output(opts.Repo, CodeRepoCheckout, out)
 		if err != nil {
@@ -102,7 +102,7 @@ func cloneOrFetch(result *BootstrapRepoResult, opts BootstrapRepoOptions) error 
 	}
 
 	_ = os.Remove(opts.RepoDir)
-	co.event(eventWithRepo(NewEvent(CodeRepoClone, LevelInfo, "cloning repository"), opts.Repo))
+	co.event(eventWithRepo(NewEvent(CodeRepoClone, LevelInfo, "Dobby is honored to clone the repository, sir"), opts.Repo))
 	args := []string{"clone"}
 	failLabel := "git clone"
 	if shallow {
@@ -126,7 +126,7 @@ func checkoutBranch(result *BootstrapRepoResult, opts BootstrapRepoOptions) erro
 		br.warn(opts.Repo, "branch setup unavailable")
 		return nil
 	}
-	event := eventWithRepo(NewEvent(CodeRepoBranch, LevelInfo, "checking out branch "+opts.Branch), opts.Repo)
+	event := eventWithRepo(NewEvent(CodeRepoBranch, LevelInfo, "Dobby switches to branch "+opts.Branch+", sir"), opts.Repo)
 	event.Details = map[string]string{"branch": opts.Branch}
 	br.event(event)
 	out, err := runLines(context.Background(), opts.RepoDir, nil, "git", "-C", opts.RepoDir, "checkout", "-B", opts.Branch)
@@ -157,7 +157,7 @@ func bootstrapGo(result *BootstrapRepoResult, opts BootstrapRepoOptions) {
 			bs.warn(opts.Repo, "go unavailable")
 			return
 		}
-		bs.event(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "downloading Go modules"), opts.Repo))
+		bs.event(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "Dobby fetches the Go modules. Dobby is a good elf!"), opts.Repo))
 		out, err := runLines(context.Background(), opts.RepoDir, nil, "go", "mod", "download")
 		bs.output(opts.Repo, CodeRepoBootstrap, out)
 		if err != nil {
@@ -203,10 +203,10 @@ func bootstrapPNPM(result *BootstrapRepoResult, opts BootstrapRepoOptions) {
 
 	args := []string{"--store-dir", storeDir, "--config.state-dir=" + stateDir, "--dir", opts.RepoDir}
 	if useFetch {
-		bs.event(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "fetching pnpm dependencies"), opts.Repo))
+		bs.event(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "Dobby fetches pnpm dependencies, sir. Dobby does not complain"), opts.Repo))
 		args = append(args, "fetch")
 	} else {
-		bs.event(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "installing pnpm dependencies"), opts.Repo))
+		bs.event(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "Dobby installs pnpm dependencies. Dobby is used to hard work, sir"), opts.Repo))
 		args = append(args, "install", "--ignore-scripts")
 	}
 	out, err := runLines(context.Background(), "", nil, "pnpm", args...)
