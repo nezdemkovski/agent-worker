@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -37,8 +38,13 @@ func RunRequestAction(ctx context.Context, payload RequestActionPayload) (*Reque
 
 	var headers strings.Builder
 	headers.WriteString(fmt.Sprintf("HTTP/%d.%d %d %s\r\n", resp.ProtoMajor, resp.ProtoMinor, resp.StatusCode, http.StatusText(resp.StatusCode)))
-	for name, values := range resp.Header {
-		for _, value := range values {
+	keys := make([]string, 0, len(resp.Header))
+	for k := range resp.Header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, name := range keys {
+		for _, value := range resp.Header.Values(name) {
 			headers.WriteString(name)
 			headers.WriteString(": ")
 			headers.WriteString(value)

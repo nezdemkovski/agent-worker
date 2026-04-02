@@ -124,66 +124,11 @@ func planNodeHTTP(opts StartPlanOptions, strategy StartStrategy) (*TypedStartPla
 			return nil, fmt.Errorf("npm unavailable")
 		}
 		checks := append(baseChecks, PlanCheck{Type: CheckCommandExists, Name: "npm"})
-		hasStart := scripts["start"]
-		hasBuild := scripts["build"]
-		hasDev := scripts["dev"]
-		switch {
-		case hasStart && hasBuild && hasDev:
-			return &TypedStartPlan{
-				RuntimeProfile: string(opts.RuntimeProfile),
-				Strategy:       string(StrategyNpmAuto),
-				Workdir:        opts.WorkDir,
-				Env:            portEnv,
-				Checks:         checks,
-				Steps: []PlanStep{
-					{Type: StepRun, Command: "npm", Args: []string{"run", "build"}, Workdir: opts.WorkDir, Env: portEnv},
-					{Type: StepRun, Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
-				},
-				Fallback: []PlanStep{
-					{Type: StepRun, Command: "npm", Args: []string{"run", "dev"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
-				},
-				Description: "try npm run build and npm run start, fallback to npm run dev",
-			}, nil
-		case hasStart && hasBuild:
-			return &TypedStartPlan{
-				RuntimeProfile: string(opts.RuntimeProfile),
-				Strategy:       string(StrategyNpmAuto),
-				Workdir:        opts.WorkDir,
-				Env:            portEnv,
-				Checks:         checks,
-				Steps: []PlanStep{
-					{Type: StepRun, Command: "npm", Args: []string{"run", "build"}, Workdir: opts.WorkDir, Env: portEnv},
-					{Type: StepRun, Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
-				},
-				Description: "run npm build and npm start",
-			}, nil
-		case hasStart:
-			return &TypedStartPlan{
-				RuntimeProfile: string(opts.RuntimeProfile),
-				Strategy:       string(StrategyNpmAuto),
-				Workdir:        opts.WorkDir,
-				Env:            portEnv,
-				Checks:         checks,
-				Steps: []PlanStep{
-					{Type: StepRun, Command: "npm", Args: []string{"run", "start"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
-				},
-				Description: "run npm start",
-			}, nil
-		case hasDev:
-			return &TypedStartPlan{
-				RuntimeProfile: string(opts.RuntimeProfile),
-				Strategy:       string(StrategyNpmAuto),
-				Workdir:        opts.WorkDir,
-				Env:            portEnv,
-				Checks:         checks,
-				Steps: []PlanStep{
-					{Type: StepRun, Command: "npm", Args: []string{"run", "dev"}, Workdir: opts.WorkDir, Env: portEnv, Exec: true},
-				},
-				Description: "run npm dev",
-			}, nil
-		default:
-			return nil, fmt.Errorf("package.json is missing both start and dev scripts")
+		plan, err := buildNpmAutoPlan(opts, portEnv, checks, scripts)
+		if err != nil {
+			return nil, err
 		}
+		return plan, nil
 	case StrategyPnpmDev:
 		checks := append(baseChecks[:2:2], PlanCheck{Type: CheckFileExists, Path: filepath.Join(opts.WorkDir, "node_modules/.bin/tsx")})
 		return &TypedStartPlan{
@@ -212,6 +157,46 @@ func planNodeHTTP(opts StartPlanOptions, strategy StartStrategy) (*TypedStartPla
 	default:
 		return nil, fmt.Errorf("unsupported runtime/start strategy %s:%s", opts.RuntimeProfile, strategy)
 	}
+}
+
+func buildNpmAutoPlan(opts StartPlanOptions, portEnv map[string]string, checks []PlanCheck, scripts map[string]bool) (*TypedStartPlan, error) {
+	npmStep := func(script string, exec bool) PlanStep {
+		return PlanStep{Type: StepRun, Command: "npm", Args: []string{"run", script}, Workdir: opts.WorkDir, Env: portEnv, Exec: exec}
+	}
+
+	var steps []PlanStep
+	var fallback []PlanStep
+	var desc string
+
+	hasStart, hasBuild, hasDev := scripts["start"], scripts["build"], scripts["dev"]
+	switch {
+	case hasStart && hasBuild && hasDev:
+		steps = []PlanStep{npmStep("build", false), npmStep("start", true)}
+		fallback = []PlanStep{npmStep("dev", true)}
+		desc = "try npm run build and npm run start, fallback to npm run dev"
+	case hasStart && hasBuild:
+		steps = []PlanStep{npmStep("build", false), npmStep("start", true)}
+		desc = "run npm build and npm start"
+	case hasStart:
+		steps = []PlanStep{npmStep("start", true)}
+		desc = "run npm start"
+	case hasDev:
+		steps = []PlanStep{npmStep("dev", true)}
+		desc = "run npm dev"
+	default:
+		return nil, fmt.Errorf("package.json is missing both start and dev scripts")
+	}
+
+	return &TypedStartPlan{
+		RuntimeProfile: string(opts.RuntimeProfile),
+		Strategy:       string(StrategyNpmAuto),
+		Workdir:        opts.WorkDir,
+		Env:            portEnv,
+		Checks:         checks,
+		Steps:          steps,
+		Fallback:       fallback,
+		Description:    desc,
+	}, nil
 }
 
 func readPackageScripts(path string) (map[string]bool, error) {

@@ -1,7 +1,7 @@
 package worker
 
 import (
-	"bytes"
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -57,8 +57,8 @@ func BootstrapRepo(opts BootstrapRepoOptions) (*BootstrapRepoResult, error) {
 	buildClonePlan(result, opts)
 
 	if !commandExists("git") {
-		result.addCheckoutWarning(opts.Repo, "git unavailable in worker image")
-		result.addBranchWarning(opts.Repo, "branch setup unavailable")
+		result.checkout().warn(opts.Repo, "git unavailable in worker image")
+		result.branch().warn(opts.Repo, "branch setup unavailable")
 		return result, nil
 	}
 
@@ -89,19 +89,20 @@ func cloneOrFetch(result *BootstrapRepoResult, opts BootstrapRepoOptions) error 
 	gitDir := filepath.Join(opts.RepoDir, ".git")
 	shallow := opts.RunMode == RunModeService || opts.RunMode == RunModeSmoke
 
+	co := result.checkout()
 	if dirExists(gitDir) {
-		result.addCheckoutEvent(eventWithRepo(NewEvent(CodeRepoCheckout, LevelInfo, "fetching latest changes"), opts.Repo))
-		out, err := runCommand(opts.RepoDir, "git", "-C", opts.RepoDir, "fetch", "--all", "--prune")
-		result.addCheckoutOutput(opts.Repo, CodeRepoCheckout, out)
+		co.event(eventWithRepo(NewEvent(CodeRepoCheckout, LevelInfo, "fetching latest changes"), opts.Repo))
+		out, err := runLines(context.Background(), opts.RepoDir, nil, "git", "-C", opts.RepoDir, "fetch", "--all", "--prune")
+		co.output(opts.Repo, CodeRepoCheckout, out)
 		if err != nil {
-			result.addCheckoutFailure(opts.Repo, "git fetch --all --prune")
+			co.fail(opts.Repo, "git fetch --all --prune")
 			return err
 		}
 		return nil
 	}
 
 	_ = os.Remove(opts.RepoDir)
-	result.addCheckoutEvent(eventWithRepo(NewEvent(CodeRepoClone, LevelInfo, "cloning repository"), opts.Repo))
+	co.event(eventWithRepo(NewEvent(CodeRepoClone, LevelInfo, "cloning repository"), opts.Repo))
 	args := []string{"clone"}
 	failLabel := "git clone"
 	if shallow {
@@ -109,10 +110,10 @@ func cloneOrFetch(result *BootstrapRepoResult, opts BootstrapRepoOptions) error 
 		failLabel = "git clone --depth 1"
 	}
 	args = append(args, opts.RemoteURL, opts.RepoDir)
-	out, err := runCommand("", "git", args...)
-	result.addCheckoutOutput(opts.Repo, CodeRepoClone, out)
+	out, err := runLines(context.Background(), "", nil, "git", args...)
+	co.output(opts.Repo, CodeRepoClone, out)
 	if err != nil {
-		result.addCheckoutFailure(opts.Repo, failLabel)
+		co.fail(opts.Repo, failLabel)
 		return err
 	}
 	return nil
@@ -120,17 +121,18 @@ func cloneOrFetch(result *BootstrapRepoResult, opts BootstrapRepoOptions) error 
 
 func checkoutBranch(result *BootstrapRepoResult, opts BootstrapRepoOptions) error {
 	gitDir := filepath.Join(opts.RepoDir, ".git")
+	br := result.branch()
 	if opts.Branch == "" || !dirExists(gitDir) {
-		result.addBranchWarning(opts.Repo, "branch setup unavailable")
+		br.warn(opts.Repo, "branch setup unavailable")
 		return nil
 	}
 	event := eventWithRepo(NewEvent(CodeRepoBranch, LevelInfo, "checking out branch "+opts.Branch), opts.Repo)
 	event.Details = map[string]string{"branch": opts.Branch}
-	result.addBranchEvent(event)
-	out, err := runCommand(opts.RepoDir, "git", "-C", opts.RepoDir, "checkout", "-B", opts.Branch)
-	result.addBranchOutput(opts.Repo, CodeRepoBranch, out)
+	br.event(event)
+	out, err := runLines(context.Background(), opts.RepoDir, nil, "git", "-C", opts.RepoDir, "checkout", "-B", opts.Branch)
+	br.output(opts.Repo, CodeRepoBranch, out)
 	if err != nil {
-		result.addBranchFailure(opts.Repo, fmt.Sprintf("git checkout -B %s", opts.Branch))
+		br.fail(opts.Repo, fmt.Sprintf("git checkout -B %s", opts.Branch))
 		return err
 	}
 	result.BranchReady = fmt.Sprintf("%s:%s", opts.Repo, opts.Branch)
@@ -141,24 +143,25 @@ func bootstrapGo(result *BootstrapRepoResult, opts BootstrapRepoOptions) {
 	if !fileExists(filepath.Join(opts.RepoDir, "go.mod")) {
 		return
 	}
+	bs := result.bootstrap()
 	switch opts.RunMode {
 	case RunModeService:
 		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("defer go module bootstrap for service startup: %s", opts.RepoDir))
-		result.addBootstrapWarning(opts.Repo, "defer go module bootstrap to service startup")
+		bs.warn(opts.Repo, "defer go module bootstrap to service startup")
 	case RunModeSmoke:
 		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip go module bootstrap for smoke verification: %s", opts.RepoDir))
-		result.addBootstrapWarning(opts.Repo, "smoke verification skips go module bootstrap")
+		bs.warn(opts.Repo, "smoke verification skips go module bootstrap")
 	default:
 		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("go -C %s mod download", opts.RepoDir))
 		if !commandExists("go") {
-			result.addBootstrapWarning(opts.Repo, "go unavailable")
+			bs.warn(opts.Repo, "go unavailable")
 			return
 		}
-		result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "downloading Go modules"), opts.Repo))
-		out, err := runCommand(opts.RepoDir, "go", "mod", "download")
-		result.addBootstrapOutput(opts.Repo, out)
+		bs.event(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "downloading Go modules"), opts.Repo))
+		out, err := runLines(context.Background(), opts.RepoDir, nil, "go", "mod", "download")
+		bs.output(opts.Repo, CodeRepoBootstrap, out)
 		if err != nil {
-			result.addBootstrapFailure(opts.Repo, "go mod download")
+			bs.fail(opts.Repo, "go mod download")
 		}
 	}
 }
@@ -173,12 +176,14 @@ func bootstrapPNPM(result *BootstrapRepoResult, opts BootstrapRepoOptions) {
 	storeDir := pnpmStoreDir(opts.PNPMStoreDir)
 	stateDir := pnpmStateDir(opts.PNPMStateDir)
 
+	bs := result.bootstrap()
+
 	if opts.RunMode == RunModeSmoke {
 		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip pnpm bootstrap for smoke verification: %s", opts.RepoDir))
 		if commandExists("pnpm") && hasLockfile {
 			_ = cleanupPNPMProjectLinks(storeDir)
 		}
-		result.addBootstrapWarning(opts.Repo, "smoke verification skips pnpm bootstrap")
+		bs.warn(opts.Repo, "smoke verification skips pnpm bootstrap")
 		return
 	}
 
@@ -191,26 +196,26 @@ func bootstrapPNPM(result *BootstrapRepoResult, opts BootstrapRepoOptions) {
 	}
 
 	if !commandExists("pnpm") {
-		result.addBootstrapWarning(opts.Repo, "pnpm unavailable")
+		bs.warn(opts.Repo, "pnpm unavailable")
 		return
 	}
 	_ = cleanupPNPMProjectLinks(storeDir)
 
 	args := []string{"--store-dir", storeDir, "--config.state-dir=" + stateDir, "--dir", opts.RepoDir}
 	if useFetch {
-		result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "fetching pnpm dependencies"), opts.Repo))
+		bs.event(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "fetching pnpm dependencies"), opts.Repo))
 		args = append(args, "fetch")
 	} else {
-		result.addBootstrapEvent(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "installing pnpm dependencies"), opts.Repo))
+		bs.event(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "installing pnpm dependencies"), opts.Repo))
 		args = append(args, "install", "--ignore-scripts")
 	}
-	out, err := runCommand("", "pnpm", args...)
-	result.addBootstrapOutput(opts.Repo, out)
+	out, err := runLines(context.Background(), "", nil, "pnpm", args...)
+	bs.output(opts.Repo, CodeRepoBootstrap, out)
 	if err != nil {
 		if useFetch {
-			result.addBootstrapFailure(opts.Repo, "pnpm fetch")
+			bs.fail(opts.Repo, "pnpm fetch")
 		} else {
-			result.addBootstrapFailure(opts.Repo, "pnpm install --ignore-scripts")
+			bs.fail(opts.Repo, "pnpm install --ignore-scripts")
 		}
 	}
 }
@@ -223,22 +228,6 @@ func commandExists(name string) bool {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-func runCommand(dir, name string, args ...string) ([]string, error) {
-	cmd := exec.Command(name, args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	lines := splitOutputLines(stdout.String(), stderr.String())
-	if err != nil {
-		return lines, err
-	}
-	return lines, nil
 }
 
 func splitOutputLines(parts ...string) []string {
@@ -292,70 +281,41 @@ func pnpmStateDir(dir string) string {
 	return "/cache/pnpm/state"
 }
 
-func (r *BootstrapRepoResult) addCheckoutEvent(event Event) {
-	r.CheckoutEvents = append(r.CheckoutEvents, event)
+type bootstrapPhase struct {
+	events *[]Event
+	lines  *[]string
+	code   EventCode
 }
 
-func (r *BootstrapRepoResult) addCheckoutOutput(repo string, code EventCode, lines []string) {
-	r.CheckoutOutput = append(r.CheckoutOutput, lines...)
-	r.CheckoutEvents = append(r.CheckoutEvents, repoOutputEvents(repo, code, lines)...)
+func (r *BootstrapRepoResult) checkout() bootstrapPhase {
+	return bootstrapPhase{&r.CheckoutEvents, &r.CheckoutOutput, CodeRepoCheckout}
 }
 
-func (r *BootstrapRepoResult) addCheckoutWarning(repo, message string) {
-	r.CheckoutOutput = append(r.CheckoutOutput, "skipped: "+message)
-	r.CheckoutEvents = append(r.CheckoutEvents, eventWithRepo(NewEvent(CodeRepoCheckout, LevelWarn, message), repo))
+func (r *BootstrapRepoResult) branch() bootstrapPhase {
+	return bootstrapPhase{&r.BranchEvents, &r.BranchOutput, CodeRepoBranch}
 }
 
-func (r *BootstrapRepoResult) addCheckoutFailure(repo, command string) {
-	message := command + " failed"
-	r.CheckoutOutput = append(r.CheckoutOutput, "failed: "+command)
-	r.CheckoutEvents = append(r.CheckoutEvents, eventWithRepo(NewEvent(CodeRepoFail, LevelError, message), repo))
+func (r *BootstrapRepoResult) bootstrap() bootstrapPhase {
+	return bootstrapPhase{&r.BootstrapEvents, &r.BootstrapOutput, CodeRepoBootstrap}
 }
 
-func (r *BootstrapRepoResult) addBranchEvent(event Event) {
-	r.BranchEvents = append(r.BranchEvents, event)
+func (p bootstrapPhase) event(e Event) {
+	*p.events = append(*p.events, e)
 }
 
-func (r *BootstrapRepoResult) addBranchOutput(repo string, code EventCode, lines []string) {
-	r.BranchOutput = append(r.BranchOutput, lines...)
-	r.BranchEvents = append(r.BranchEvents, repoOutputEvents(repo, code, lines)...)
-}
-
-func (r *BootstrapRepoResult) addBranchWarning(repo, message string) {
-	r.BranchOutput = append(r.BranchOutput, "skipped: "+message)
-	r.BranchEvents = append(r.BranchEvents, eventWithRepo(NewEvent(CodeRepoBranch, LevelWarn, message), repo))
-}
-
-func (r *BootstrapRepoResult) addBranchFailure(repo, command string) {
-	message := command + " failed"
-	r.BranchOutput = append(r.BranchOutput, "failed: "+command)
-	r.BranchEvents = append(r.BranchEvents, eventWithRepo(NewEvent(CodeRepoFail, LevelError, message), repo))
-}
-
-func (r *BootstrapRepoResult) addBootstrapEvent(event Event) {
-	r.BootstrapEvents = append(r.BootstrapEvents, event)
-}
-
-func (r *BootstrapRepoResult) addBootstrapOutput(repo string, lines []string) {
-	r.BootstrapOutput = append(r.BootstrapOutput, lines...)
-	r.BootstrapEvents = append(r.BootstrapEvents, repoOutputEvents(repo, CodeRepoBootstrap, lines)...)
-}
-
-func (r *BootstrapRepoResult) addBootstrapWarning(repo, message string) {
-	r.BootstrapOutput = append(r.BootstrapOutput, "skipped: "+message)
-	r.BootstrapEvents = append(r.BootstrapEvents, eventWithRepo(NewEvent(CodeRepoBootstrap, LevelWarn, message), repo))
-}
-
-func (r *BootstrapRepoResult) addBootstrapFailure(repo, command string) {
-	message := command + " failed"
-	r.BootstrapOutput = append(r.BootstrapOutput, "failed: "+command)
-	r.BootstrapEvents = append(r.BootstrapEvents, eventWithRepo(NewEvent(CodeRepoFail, LevelError, message), repo))
-}
-
-func repoOutputEvents(repo string, code EventCode, lines []string) []Event {
-	events := make([]Event, 0, len(lines))
-	for _, line := range lines {
-		events = append(events, eventWithRepo(NewEvent(code, LevelInfo, line), repo))
+func (p bootstrapPhase) output(repo string, code EventCode, out []string) {
+	*p.lines = append(*p.lines, out...)
+	for _, line := range out {
+		*p.events = append(*p.events, eventWithRepo(NewEvent(code, LevelInfo, line), repo))
 	}
-	return events
+}
+
+func (p bootstrapPhase) warn(repo, message string) {
+	*p.lines = append(*p.lines, "skipped: "+message)
+	*p.events = append(*p.events, eventWithRepo(NewEvent(p.code, LevelWarn, message), repo))
+}
+
+func (p bootstrapPhase) fail(repo, command string) {
+	*p.lines = append(*p.lines, "failed: "+command)
+	*p.events = append(*p.events, eventWithRepo(NewEvent(CodeRepoFail, LevelError, command+" failed"), repo))
 }

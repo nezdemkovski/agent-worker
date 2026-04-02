@@ -1,11 +1,9 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -122,6 +120,53 @@ func bootstrapPayloadRepos(payload *WorkerPayload, workspaceDir string, arts wor
 	return nil
 }
 
+type verifyProbe struct {
+	profiles  []string
+	detector  string // "go.mod", "package.json", or "" for smoke
+	tools     []string
+	eventCode EventCode
+	eventMsg  string
+	failLevel EventLevel
+	failMsg   string
+	buildArgs func(target, repoDir string) []string
+	planFmt   func(target string) string
+}
+
+var verifyProbes = []verifyProbe{
+	{
+		profiles:  []string{"smoke"},
+		tools:     []string{"mirrord"},
+		eventCode: CodeMirrordSmokeProbe,
+		eventMsg:  "smoke probe",
+		failLevel: LevelWarn,
+		failMsg:   "mirrord smoke probe",
+		buildArgs: func(target, _ string) []string { return []string{"mirrord", "exec", "--target", target, "--", "true"} },
+		planFmt:   func(target string) string { return fmt.Sprintf("mirrord exec --target %s -- true", target) },
+	},
+	{
+		profiles:  []string{"backend", "full"},
+		detector:  "go.mod",
+		tools:     []string{"mirrord", "go"},
+		eventCode: CodeMirrordGoTest,
+		eventMsg:  "go test via mirrord",
+		failLevel: LevelError,
+		failMsg:   "mirrord go test ./...",
+		buildArgs: func(target, _ string) []string { return []string{"mirrord", "exec", "--target", target, "--", "go", "test", "./..."} },
+		planFmt:   func(target string) string { return fmt.Sprintf("mirrord exec --target %s -- go test ./...", target) },
+	},
+	{
+		profiles:  []string{"frontend"},
+		detector:  "package.json",
+		tools:     []string{"mirrord", "pnpm"},
+		eventCode: CodeMirrordPnpmTest,
+		eventMsg:  "pnpm test via mirrord",
+		failLevel: LevelError,
+		failMsg:   "mirrord pnpm test",
+		buildArgs: func(target, _ string) []string { return []string{"mirrord", "exec", "--target", target, "--", "pnpm", "test"} },
+		planFmt:   func(target string) string { return fmt.Sprintf("mirrord exec --target %s -- pnpm test", target) },
+	},
+}
+
 func runVerifyServiceProbes(ctx context.Context, payload *WorkerPayload, serviceSpecs map[string]ServiceSpec, arts workerArtifacts, serviceResult, mirrordResult *eventLogFile) (bool, error) {
 	if len(payload.Services) == 0 {
 		_ = serviceResult.Append(NewEvent(CodeServiceSkip, LevelInfo, "no service interception requested"))
@@ -129,6 +174,7 @@ func runVerifyServiceProbes(ctx context.Context, payload *WorkerPayload, service
 		return false, nil
 	}
 
+	profile := strings.TrimSpace(payload.VerificationProfile)
 	var hadFailure bool
 	for _, service := range payload.Services {
 		if strings.TrimSpace(service) == "" {
@@ -140,75 +186,61 @@ func runVerifyServiceProbes(ctx context.Context, payload *WorkerPayload, service
 
 		_ = serviceResult.Append(withService(NewEvent(CodeServiceTarget, LevelInfo, target), service, map[string]string{"target": target}))
 
-		switch strings.TrimSpace(payload.VerificationProfile) {
-		case "smoke":
-			appendLine(arts.MirrordPlan, fmt.Sprintf("mirrord exec --target %s -- true", target))
-			if !commandExists("mirrord") {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, "mirrord unavailable"), service, nil))
-				continue
-			}
-			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSmokeProbe, LevelInfo, "smoke probe"), service, nil))
-			lines, err := runCommandContext(ctx, "", nil, "mirrord", "exec", "--target", target, "--", "true")
-			appendOutputEvents(mirrordResult, CodeMirrordExec, LevelInfo, service, "", lines)
-			if err != nil {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, LevelWarn, "mirrord smoke probe"), service, nil))
-			}
-		case "backend", "full":
+		probe := findVerifyProbe(profile)
+		if probe == nil {
+			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, "mirrord execution not defined for profile "+profile), service, nil))
+			continue
+		}
+
+		if probe.detector != "" {
 			if !dirExists(repoDir) {
 				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, "no matching repo checkout at "+repoDir), service, nil))
 				continue
 			}
-			if !fileExists(filepath.Join(repoDir, "go.mod")) {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelInfo, "backend repo not detected at "+repoDir), service, nil))
+			if !fileExists(filepath.Join(repoDir, probe.detector)) {
+				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelInfo, probe.detector+" not detected at "+repoDir), service, nil))
 				continue
 			}
-			appendLine(arts.MirrordPlan, fmt.Sprintf("mirrord exec --target %s -- go test ./...", target))
-			if !commandExists("mirrord") {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, "mirrord unavailable"), service, nil))
-				continue
+		}
+
+		appendLine(arts.MirrordPlan, probe.planFmt(target))
+
+		missingTool := ""
+		for _, tool := range probe.tools {
+			if !commandExists(tool) {
+				missingTool = tool
+				break
 			}
-			if !commandExists("go") {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, "go unavailable"), service, nil))
-				continue
-			}
-			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordGoTest, LevelInfo, "go test via mirrord"), service, nil))
-			lines, err := runCommandContext(ctx, repoDir, nil, "mirrord", "exec", "--target", target, "--", "go", "test", "./...")
-			appendOutputEvents(mirrordResult, CodeMirrordExec, LevelInfo, service, "", lines)
-			if err != nil {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, LevelError, "mirrord go test ./..."), service, nil))
+		}
+		if missingTool != "" {
+			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, missingTool+" unavailable"), service, nil))
+			continue
+		}
+
+		_ = mirrordResult.Append(withService(NewEvent(probe.eventCode, LevelInfo, probe.eventMsg), service, nil))
+		args := probe.buildArgs(target, repoDir)
+		lines, err := runLines(ctx, repoDir, nil, args[0], args[1:]...)
+		appendOutputEvents(mirrordResult, CodeMirrordExec, LevelInfo, service, "", lines)
+		if err != nil {
+			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, probe.failLevel, probe.failMsg), service, nil))
+			if probe.failLevel == LevelError {
 				hadFailure = true
 			}
-		case "frontend":
-			if !dirExists(repoDir) {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, "no matching repo checkout at "+repoDir), service, nil))
-				continue
-			}
-			if !fileExists(filepath.Join(repoDir, "package.json")) {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelInfo, "frontend repo not detected at "+repoDir), service, nil))
-				continue
-			}
-			appendLine(arts.MirrordPlan, fmt.Sprintf("mirrord exec --target %s -- pnpm test", target))
-			if !commandExists("mirrord") {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, "mirrord unavailable"), service, nil))
-				continue
-			}
-			if !commandExists("pnpm") {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, "pnpm unavailable"), service, nil))
-				continue
-			}
-			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordPnpmTest, LevelInfo, "pnpm test via mirrord"), service, nil))
-			lines, err := runCommandContext(ctx, repoDir, nil, "mirrord", "exec", "--target", target, "--", "pnpm", "test")
-			appendOutputEvents(mirrordResult, CodeMirrordExec, LevelInfo, service, "", lines)
-			if err != nil {
-				_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, LevelError, "mirrord pnpm test"), service, nil))
-				hadFailure = true
-			}
-		default:
-			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordSkip, LevelWarn, "mirrord execution not defined for profile "+payload.VerificationProfile), service, nil))
 		}
 	}
 
 	return hadFailure, nil
+}
+
+func findVerifyProbe(profile string) *verifyProbe {
+	for i := range verifyProbes {
+		for _, p := range verifyProbes[i].profiles {
+			if p == profile {
+				return &verifyProbes[i]
+			}
+		}
+	}
+	return nil
 }
 
 func runVerificationProfileChecks(ctx context.Context, payload *WorkerPayload, repoSpecs map[string]RepoSpec, serviceSpecs map[string]ServiceSpec, workspaceDir string, arts workerArtifacts, verificationResult, mirrordResult, serviceResult *eventLogFile) (bool, error) {
@@ -233,7 +265,7 @@ func runVerificationProfileChecks(ctx context.Context, payload *WorkerPayload, r
 				if fileExists(filepath.Join(repoDir, "go.mod")) {
 					if commandExists("go") {
 						_ = verificationResult.Append(eventWithRepo(NewEvent(CodeVerificationGoTest, LevelInfo, "go test ./..."), repo))
-						lines, err := runCommandContext(ctx, repoDir, nil, "go", "test", "./...")
+						lines, err := runLines(ctx, repoDir, nil, "go", "test", "./...")
 						appendOutputEvents(verificationResult, CodeVerificationGoTest, LevelInfo, "", repo, lines)
 						if err != nil {
 							_ = verificationResult.Append(eventWithRepo(NewEvent(CodeVerificationFail, LevelError, "go test ./..."), repo))
@@ -259,24 +291,6 @@ func runVerificationProfileChecks(ctx context.Context, payload *WorkerPayload, r
 		_ = verificationResult.Append(NewEvent(CodeVerificationSkip, LevelWarn, "unknown verification profile: "+payload.VerificationProfile))
 		return false, nil
 	}
-}
-
-func runCommandContext(ctx context.Context, dir string, env map[string]string, name string, args ...string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	if len(env) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range env {
-			cmd.Env = setEnvVar(cmd.Env, k, v)
-		}
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return splitOutputLines(stdout.String(), stderr.String()), err
 }
 
 func appendOutputEvents(log *eventLogFile, code EventCode, level EventLevel, service, repo string, lines []string) {

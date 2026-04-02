@@ -34,6 +34,11 @@ func (l serviceControlLoop) processPendingRequests(ctx context.Context, currentP
 	sort.Strings(matches)
 	var restarted bool
 	for _, requestFile := range matches {
+		select {
+		case <-ctx.Done():
+			return restarted, ctx.Err()
+		default:
+		}
 		didRestart, err := l.processRequest(ctx, requestFile, currentPID)
 		if err != nil {
 			return false, err

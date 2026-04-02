@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 )
 
@@ -45,4 +46,16 @@ func RunCommand(ctx context.Context, dir string, env []string, stdin string, nam
 	}
 	result.ExitCode = -1
 	return result, err
+}
+
+func runLines(ctx context.Context, dir string, env map[string]string, name string, args ...string) ([]string, error) {
+	var envSlice []string
+	if len(env) > 0 {
+		envSlice = os.Environ()
+		for k, v := range env {
+			envSlice = setEnvVar(envSlice, k, v)
+		}
+	}
+	result, err := RunCommand(ctx, dir, envSlice, "", name, args...)
+	return splitOutputLines(result.Stdout, result.Stderr), err
 }
