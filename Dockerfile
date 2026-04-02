@@ -45,10 +45,13 @@ RUN apt-get update \
          arm64) CODEX_ARCH="aarch64" ;; \
          *) echo "unsupported architecture: ${ARCH}" >&2; exit 1 ;; \
        esac \
-    && curl -fsSL "https://github.com/openai/codex/releases/latest/download/codex-${CODEX_ARCH}-unknown-linux-musl.tar.gz" \
-       | tar -xz -C /usr/local/bin \
+    && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL \
+       "https://github.com/openai/codex/releases/latest/download/codex-${CODEX_ARCH}-unknown-linux-musl.tar.gz" \
+       -o /tmp/codex.tar.gz \
+    && tar -xzf /tmp/codex.tar.gz -C /usr/local/bin \
     && mv /usr/local/bin/codex-${CODEX_ARCH}-unknown-linux-musl /usr/local/bin/codex \
     && chmod +x /usr/local/bin/codex \
+    && rm -f /tmp/codex.tar.gz \
     && corepack enable \
     && corepack prepare pnpm@${PNPM_VERSION} --activate \
     && rm -rf /var/lib/apt/lists/*

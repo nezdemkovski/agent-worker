@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -52,6 +53,45 @@ func ExecuteControl(ctx context.Context, req *ControlRequest, opts ControlExecOp
 			ResponseHeaders: result.Probe.Headers,
 			ResponseBody:    result.Probe.Body,
 		})
+		return resp
+	case ActionRequest:
+		var payload RequestActionPayload
+		if err := json.Unmarshal(req.Payload, &payload); err != nil {
+			return NewControlErrorResponse(req, "request.invalid_payload", err.Error())
+		}
+		result, err := RunRequestAction(ctx, payload)
+		resp := NewControlResponse(req, StatusOK)
+		_ = resp.SetResult(result)
+		if err != nil {
+			resp.Status = StatusError
+			resp.Error = &ControlError{Code: "request.failed", Message: err.Error()}
+		}
+		return resp
+	case ActionExec:
+		var payload ExecActionPayload
+		if err := json.Unmarshal(req.Payload, &payload); err != nil {
+			return NewControlErrorResponse(req, "exec.invalid_payload", err.Error())
+		}
+		result, err := RunExecAction(ctx, payload)
+		resp := NewControlResponse(req, StatusOK)
+		_ = resp.SetResult(result)
+		if err != nil {
+			resp.Status = StatusError
+			resp.Error = &ControlError{Code: "exec.failed", Message: err.Error()}
+		}
+		return resp
+	case ActionPrompt:
+		var payload PromptActionPayload
+		if err := json.Unmarshal(req.Payload, &payload); err != nil {
+			return NewControlErrorResponse(req, "prompt.invalid_payload", err.Error())
+		}
+		result, err := RunPromptAction(ctx, payload)
+		resp := NewControlResponse(req, StatusOK)
+		_ = resp.SetResult(result)
+		if err != nil {
+			resp.Status = StatusError
+			resp.Error = &ControlError{Code: "prompt.failed", Message: err.Error()}
+		}
 		return resp
 	default:
 		return NewControlErrorResponse(req, "unsupported_action", fmt.Sprintf("unsupported control action %q", req.Action))

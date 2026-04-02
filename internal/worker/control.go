@@ -48,6 +48,50 @@ type RestartActionResult struct {
 	ResponseBody    string `json:"response_body,omitempty"`
 }
 
+type RequestActionPayload struct {
+	URL     string   `json:"url"`
+	Method  string   `json:"method"`
+	Headers []string `json:"headers,omitempty"`
+	Body    string   `json:"body,omitempty"`
+}
+
+type RequestActionResult struct {
+	URL        string `json:"url"`
+	Method     string `json:"method"`
+	StatusCode int    `json:"status_code"`
+	Headers    string `json:"headers"`
+	Body       string `json:"body"`
+}
+
+type ExecActionPayload struct {
+	Command []string `json:"command"`
+}
+
+type ExecActionResult struct {
+	Command  []string `json:"command"`
+	Stdout   string   `json:"stdout"`
+	Stderr   string   `json:"stderr"`
+	ExitCode int      `json:"exit_code"`
+}
+
+type PromptActionPayload struct {
+	Tool    string `json:"tool"`
+	Repo    string `json:"repo"`
+	RepoDir string `json:"repo_dir"`
+	Prompt  string `json:"prompt"`
+}
+
+type PromptActionResult struct {
+	Tool         string   `json:"tool"`
+	Repo         string   `json:"repo"`
+	PromptSHA256 string   `json:"prompt_sha256"`
+	Output       string   `json:"output"`
+	Stderr       string   `json:"stderr"`
+	ChangedFiles []string `json:"changed_files,omitempty"`
+	Command      []string `json:"command,omitempty"`
+	ExitCode     int      `json:"exit_code"`
+}
+
 func NewControlResponse(req *ControlRequest, status string) *ControlResponse {
 	return &ControlResponse{
 		Version:   1,

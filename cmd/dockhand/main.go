@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,6 +42,8 @@ func main() {
 		os.Exit(runHash(os.Args[2:]))
 	case "control":
 		os.Exit(runControl(os.Args[2:]))
+	case "submit-control":
+		os.Exit(runSubmitControl(os.Args[2:]))
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -419,6 +422,75 @@ func runControl(args []string) int {
 		Version int    `json:"version"`
 		Status  string `json:"status"`
 	}{Version: responseVersion, Status: worker.StatusOK})
+	return 0
+}
+
+func runSubmitControl(args []string) int {
+	fs := flag.NewFlagSet("submit-control", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+
+	controlDir := fs.String("control-dir", "/artifacts/control", "control request directory")
+	timeout := fs.Duration("timeout", 180*time.Second, "maximum time to wait for a control response")
+	requestFile := fs.String("request-file", "", "path to request JSON file (default: read stdin)")
+	requestJSON := fs.String("request-json", "", "request JSON payload")
+	if err := fs.Parse(args); err != nil {
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
+		return 2
+	}
+
+	var reqData []byte
+	var err error
+	if strings.TrimSpace(*requestJSON) != "" {
+		reqData = []byte(*requestJSON)
+	} else if *requestFile != "" {
+		reqData, err = os.ReadFile(*requestFile)
+	} else {
+		reqData, err = io.ReadAll(os.Stdin)
+	}
+	if err != nil {
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("read request: %v", err)})
+		return 1
+	}
+
+	var req worker.ControlRequest
+	if err := json.Unmarshal(reqData, &req); err != nil {
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("parse request: %v", err)})
+		return 1
+	}
+	if strings.TrimSpace(req.RequestID) == "" {
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: "request_id is required"})
+		return 1
+	}
+	if err := os.MkdirAll(*controlDir, 0o755); err != nil {
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("mkdir control dir: %v", err)})
+		return 1
+	}
+
+	reqPath := filepath.Join(*controlDir, fmt.Sprintf("%s-%s.request", req.Action, req.RequestID))
+	respPath := strings.TrimSuffix(reqPath, ".request") + ".response"
+	_ = os.Remove(reqPath)
+	_ = os.Remove(respPath)
+	if err := os.WriteFile(reqPath, reqData, 0o644); err != nil {
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("write request: %v", err)})
+		return 1
+	}
+
+	deadline := time.Now().Add(*timeout)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(respPath); err == nil {
+			fmt.Println(string(data))
+			return 0
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	timeoutResp := worker.NewControlErrorResponse(&req, "control.timeout", "timeout waiting for control response")
+	respData, err := json.Marshal(timeoutResp)
+	if err != nil {
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("encode timeout response: %v", err)})
+		return 1
+	}
+	fmt.Println(string(respData))
 	return 0
 }
 
