@@ -271,6 +271,49 @@ func TestMonitorExitsWhenProcessDies(t *testing.T) {
 	}
 }
 
+func TestExecPlanHonorsExecWorkdir(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workdir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(): %v", err)
+	}
+	outputPath := filepath.Join(root, "cwd.txt")
+
+	cmd := exec.Command("env",
+		"GO_WANT_HELPER_PROCESS=1",
+		"HELPER_WORKDIR="+workdir,
+		"HELPER_OUTPUT="+outputPath,
+		os.Args[0],
+		"-test.run=TestWorkerHelperProcess",
+		"--",
+		"exec-plan-cwd",
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("helper exec-plan run failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", outputPath, err)
+	}
+	got := strings.TrimSpace(string(data))
+	want, err := filepath.EvalSymlinks(workdir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", workdir, err)
+	}
+	gotResolved, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", got, err)
+	}
+	if gotResolved != want {
+		t.Fatalf("expected exec step cwd %q, got %q", want, gotResolved)
+	}
+}
+
 func TestMonitorReturnsImmediatelyForDeadPID(t *testing.T) {
 	t.Parallel()
 
@@ -782,6 +825,30 @@ func TestWorkerHelperProcess(t *testing.T) {
 	case "spawn-child":
 		fmt.Fprintln(os.Stderr, "spawn-child helper is no longer used")
 		os.Exit(2)
+	case "exec-plan-cwd":
+		workdir := os.Getenv("HELPER_WORKDIR")
+		output := os.Getenv("HELPER_OUTPUT")
+		if workdir == "" || output == "" {
+			fmt.Fprintln(os.Stderr, "missing HELPER_WORKDIR or HELPER_OUTPUT")
+			os.Exit(2)
+		}
+		plan := &TypedStartPlan{
+			Workdir: workdir,
+			Steps: []PlanStep{
+				{
+					Type:    StepRun,
+					Command: "sh",
+					Args:    []string{"-c", "pwd > \"$1\"", "--", output},
+					Workdir: workdir,
+					Exec:    true,
+				},
+			},
+		}
+		if err := ExecPlan(plan); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown helper mode %q\n", mode)
 		os.Exit(2)

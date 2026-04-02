@@ -90,6 +90,11 @@ func ExecStep(step PlanStep, planEnv map[string]string, defaultWorkdir string) e
 		}
 
 		if step.Exec {
+			if workdir != "" {
+				if err := os.Chdir(workdir); err != nil {
+					return fmt.Errorf("chdir %s: %w", workdir, err)
+				}
+			}
 			return syscall.Exec(cmdPath, args, env)
 		}
 
