@@ -6,29 +6,26 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/nezdemkovski/agent-worker/internal/worker"
 )
 
 func TestEmitJSON(t *testing.T) {
 	output := captureStdout(t, func() {
-		emit(map[string]string{"status": "ok", "pid": "123"}, outputMode{json: true})
+		emitJSON(superviseResponse{
+			Status:   worker.StatusOK,
+			PID:      123,
+			ReadyURL: "http://127.0.0.1:31140/healthz",
+		})
 	})
 	if !strings.Contains(output, `"status":"ok"`) {
 		t.Fatalf("expected JSON status field, got %q", output)
 	}
-	if !strings.Contains(output, `"pid":"123"`) {
-		t.Fatalf("expected JSON pid field, got %q", output)
+	if !strings.Contains(output, `"pid":123`) {
+		t.Fatalf("expected JSON numeric pid field, got %q", output)
 	}
-}
-
-func TestEmitKeyValue(t *testing.T) {
-	output := captureStdout(t, func() {
-		emit(map[string]string{"status": "ok", "pid": "123"}, outputMode{})
-	})
-	if !strings.Contains(output, "status=ok") {
-		t.Fatalf("expected key=value status, got %q", output)
-	}
-	if !strings.Contains(output, "pid=123") {
-		t.Fatalf("expected key=value pid, got %q", output)
+	if strings.Contains(output, "status=ok") {
+		t.Fatalf("expected JSON-only output, got %q", output)
 	}
 }
 

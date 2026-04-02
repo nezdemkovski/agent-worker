@@ -33,10 +33,10 @@ func main() {
 		printUsage()
 		return
 	default:
-		emit(map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: fmt.Sprintf("unknown subcommand %q", os.Args[1]),
-		}, outputMode{})
+		emitJSON(errorResponse{
+			Status: worker.StatusError,
+			Reason: fmt.Sprintf("unknown subcommand %q", os.Args[1]),
+		})
 		os.Exit(2)
 	}
 }
@@ -45,7 +45,6 @@ func runSupervise(args []string) int {
 	fs := flag.NewFlagSet("supervise", flag.ContinueOnError)
 	fs.SetOutput(ioDiscard{})
 
-	jsonOutput := fs.Bool("json", false, "emit JSON output")
 	readyURL := fs.String("ready-url", "", "readiness URL to poll")
 	readyTimeout := fs.Duration("ready-timeout", 30*time.Second, "maximum readiness wait time")
 	pidFile := fs.String("pid-file", "", "path to write child pid")
@@ -53,10 +52,10 @@ func runSupervise(args []string) int {
 
 	cmdArgs, err := parseCommandArgs(fs, args)
 	if err != nil {
-		emit(map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: err.Error(),
-		}, outputMode{json: *jsonOutput})
+		emitJSON(errorResponse{
+			Status: worker.StatusError,
+			Reason: err.Error(),
+		})
 		return 2
 	}
 
@@ -68,23 +67,23 @@ func runSupervise(args []string) int {
 		LogFile:      *logFile,
 	})
 	if err != nil {
-		fields := map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: err.Error(),
+		response := errorResponse{
+			Status: worker.StatusError,
+			Reason: err.Error(),
 		}
 		var supErr *worker.SuperviseError
 		if errors.As(err, &supErr) {
-			fields[worker.KeyReasonCode] = string(supErr.Code)
+			response.ReasonCode = supErr.Code
 		}
-		emit(fields, outputMode{json: *jsonOutput})
+		emitJSON(response)
 		return 1
 	}
 
-	emit(map[string]string{
-		worker.KeyStatus:   worker.StatusOK,
-		worker.KeyPID:      fmt.Sprintf("%d", result.PID),
-		worker.KeyReadyURL: result.ReadyURL,
-	}, outputMode{json: *jsonOutput})
+	emitJSON(superviseResponse{
+		Status:   worker.StatusOK,
+		PID:      result.PID,
+		ReadyURL: result.ReadyURL,
+	})
 	return 0
 }
 
@@ -92,29 +91,28 @@ func runTerminate(args []string) int {
 	fs := flag.NewFlagSet("terminate", flag.ContinueOnError)
 	fs.SetOutput(ioDiscard{})
 
-	jsonOutput := fs.Bool("json", false, "emit JSON output")
 	pid := fs.Int("pid", 0, "pid to terminate")
 	grace := fs.Duration("grace", 2*time.Second, "grace period before force kill")
 	if err := fs.Parse(args); err != nil {
-		emit(map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: err.Error(),
-		}, outputMode{json: *jsonOutput})
+		emitJSON(errorResponse{
+			Status: worker.StatusError,
+			Reason: err.Error(),
+		})
 		return 2
 	}
 
 	if err := worker.Terminate(*pid, *grace); err != nil {
-		emit(map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: err.Error(),
-		}, outputMode{json: *jsonOutput})
+		emitJSON(errorResponse{
+			Status: worker.StatusError,
+			Reason: err.Error(),
+		})
 		return 1
 	}
 
-	emit(map[string]string{
-		worker.KeyStatus: worker.StatusOK,
-		worker.KeyPID:    fmt.Sprintf("%d", *pid),
-	}, outputMode{json: *jsonOutput})
+	emitJSON(terminateResponse{
+		Status: worker.StatusOK,
+		PID:    *pid,
+	})
 	return 0
 }
 
@@ -122,39 +120,38 @@ func runMonitor(args []string) int {
 	fs := flag.NewFlagSet("monitor", flag.ContinueOnError)
 	fs.SetOutput(ioDiscard{})
 
-	jsonOutput := fs.Bool("json", false, "emit JSON output")
 	pid := fs.Int("pid", 0, "pid to monitor")
 	interval := fs.Duration("interval", 500*time.Millisecond, "polling interval")
 	once := fs.Bool("once", false, "check status once and exit (no polling)")
 	if err := fs.Parse(args); err != nil {
-		emit(map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: err.Error(),
-		}, outputMode{json: *jsonOutput})
+		emitJSON(errorResponse{
+			Status: worker.StatusError,
+			Reason: err.Error(),
+		})
 		return 2
 	}
 
 	if *once {
 		s := worker.ProcessStatus(*pid)
-		emit(map[string]string{
-			worker.KeyStatus: string(s),
-			worker.KeyPID:    fmt.Sprintf("%d", *pid),
-		}, outputMode{json: *jsonOutput})
+		emitJSON(monitorResponse{
+			Status: string(s),
+			PID:    *pid,
+		})
 		return 0
 	}
 
 	if err := worker.Monitor(worker.MonitorOptions{PID: *pid, Interval: *interval}); err != nil {
-		emit(map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: err.Error(),
-		}, outputMode{json: *jsonOutput})
+		emitJSON(errorResponse{
+			Status: worker.StatusError,
+			Reason: err.Error(),
+		})
 		return 1
 	}
 
-	emit(map[string]string{
-		worker.KeyStatus: worker.StatusGone,
-		worker.KeyPID:    fmt.Sprintf("%d", *pid),
-	}, outputMode{json: *jsonOutput})
+	emitJSON(monitorResponse{
+		Status: worker.StatusGone,
+		PID:    *pid,
+	})
 	return 0
 }
 
@@ -162,14 +159,13 @@ func runHash(args []string) int {
 	fs := flag.NewFlagSet("hash", flag.ContinueOnError)
 	fs.SetOutput(ioDiscard{})
 
-	jsonOutput := fs.Bool("json", false, "emit JSON output")
 	repoDir := fs.String("repo-dir", "", "repository root directory")
 	profile := fs.String("profile", "", "runtime profile (node-http, go-http, worker-metrics)")
 	if err := fs.Parse(args); err != nil {
-		emit(map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: err.Error(),
-		}, outputMode{json: *jsonOutput})
+		emitJSON(errorResponse{
+			Status: worker.StatusError,
+			Reason: err.Error(),
+		})
 		return 2
 	}
 
@@ -177,10 +173,10 @@ func runHash(args []string) int {
 		RepoDir:        *repoDir,
 		RuntimeProfile: worker.RuntimeProfile(*profile),
 	})
-	emit(map[string]string{
-		worker.KeyStatus: worker.StatusOK,
-		worker.KeyHash:   hash,
-	}, outputMode{json: *jsonOutput})
+	emitJSON(hashResponse{
+		Status: worker.StatusOK,
+		Hash:   hash,
+	})
 	return 0
 }
 
@@ -188,7 +184,6 @@ func runRestart(args []string) int {
 	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
 	fs.SetOutput(ioDiscard{})
 
-	jsonOutput := fs.Bool("json", false, "emit JSON output")
 	pidFile := fs.String("pid-file", "", "path to pid file (reads old pid, writes new pid)")
 	readyURL := fs.String("ready-url", "", "readiness URL to poll")
 	readyTimeout := fs.Duration("ready-timeout", 30*time.Second, "maximum readiness wait time")
@@ -197,10 +192,10 @@ func runRestart(args []string) int {
 
 	cmdArgs, err := parseCommandArgs(fs, args)
 	if err != nil {
-		emit(map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: err.Error(),
-		}, outputMode{json: *jsonOutput})
+		emitJSON(errorResponse{
+			Status: worker.StatusError,
+			Reason: err.Error(),
+		})
 		return 2
 	}
 
@@ -213,26 +208,26 @@ func runRestart(args []string) int {
 		Grace:        *grace,
 	})
 	if err != nil {
-		fields := map[string]string{
-			worker.KeyStatus: worker.StatusError,
-			worker.KeyReason: err.Error(),
+		response := errorResponse{
+			Status: worker.StatusError,
+			Reason: err.Error(),
 		}
 		var supErr *worker.SuperviseError
 		if errors.As(err, &supErr) {
-			fields[worker.KeyReasonCode] = string(supErr.Code)
+			response.ReasonCode = supErr.Code
 		}
-		emit(fields, outputMode{json: *jsonOutput})
+		emitJSON(response)
 		return 1
 	}
 
-	emit(map[string]string{
-		worker.KeyStatus:     worker.StatusOK,
-		worker.KeyOldPID:     fmt.Sprintf("%d", result.OldPID),
-		worker.KeyNewPID:     fmt.Sprintf("%d", result.NewPID),
-		worker.KeyReadyURL:   result.ReadyURL,
-		worker.KeyOldCmdline: result.OldCmdline,
-		worker.KeyNewCmdline: result.NewCmdline,
-	}, outputMode{json: *jsonOutput})
+	emitJSON(restartResponse{
+		Status:     worker.StatusOK,
+		OldPID:     result.OldPID,
+		NewPID:     result.NewPID,
+		ReadyURL:   result.ReadyURL,
+		OldCmdline: result.OldCmdline,
+		NewCmdline: result.NewCmdline,
+	})
 	return 0
 }
 
@@ -263,11 +258,11 @@ func printUsage() {
 dockhand is a small process supervisor for agent-worker images.
 
 Usage:
-  dockhand supervise [--json] --ready-url URL [--ready-timeout DURATION] [--pid-file PATH] [--log-file PATH] -- <command...>
-  dockhand terminate [--json] --pid PID [--grace DURATION]
-  dockhand restart [--json] --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
-  dockhand monitor [--json] --pid PID [--interval DURATION] [--once]
-  dockhand hash [--json] --repo-dir PATH [--profile PROFILE]
+  dockhand supervise --ready-url URL [--ready-timeout DURATION] [--pid-file PATH] [--log-file PATH] -- <command...>
+  dockhand terminate --pid PID [--grace DURATION]
+  dockhand restart --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
+  dockhand monitor --pid PID [--interval DURATION] [--once]
+  dockhand hash --repo-dir PATH [--profile PROFILE]
 `))
 }
 

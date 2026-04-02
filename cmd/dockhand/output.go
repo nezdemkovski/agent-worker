@@ -4,30 +4,55 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
+
+	"github.com/nezdemkovski/agent-worker/internal/worker"
 )
 
-type outputMode struct {
-	json bool
+type errorResponse struct {
+	Status     string            `json:"status"`
+	Reason     string            `json:"reason"`
+	ReasonCode worker.ReasonCode `json:"reason_code,omitempty"`
 }
 
-func emit(fields map[string]string, mode outputMode) {
-	if mode.json {
-		data, err := json.Marshal(fields)
-		if err != nil {
-			fmt.Fprintf(os.Stdout, "{\"status\":\"error\",\"reason\":%q}\n", "failed to encode JSON output")
-			return
-		}
-		fmt.Fprintln(os.Stdout, string(data))
+type superviseResponse struct {
+	Status   string `json:"status"`
+	PID      int    `json:"pid,omitempty"`
+	ReadyURL string `json:"ready_url,omitempty"`
+}
+
+type terminateResponse struct {
+	Status string `json:"status"`
+	PID    int    `json:"pid,omitempty"`
+}
+
+type monitorResponse struct {
+	Status string `json:"status"`
+	PID    int    `json:"pid,omitempty"`
+}
+
+type hashResponse struct {
+	Status string `json:"status"`
+	Hash   string `json:"hash,omitempty"`
+}
+
+type restartResponse struct {
+	Status     string `json:"status"`
+	OldPID     int    `json:"old_pid,omitempty"`
+	NewPID     int    `json:"new_pid,omitempty"`
+	ReadyURL   string `json:"ready_url,omitempty"`
+	OldCmdline string `json:"old_cmdline,omitempty"`
+	NewCmdline string `json:"new_cmdline,omitempty"`
+}
+
+func emitJSON(v any) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		fallback, _ := json.Marshal(errorResponse{
+			Status: worker.StatusError,
+			Reason: "failed to encode JSON output",
+		})
+		fmt.Fprintln(os.Stdout, string(fallback))
 		return
 	}
-
-	keys := make([]string, 0, len(fields))
-	for key := range fields {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		fmt.Printf("%s=%s\n", key, fields[key])
-	}
+	fmt.Fprintln(os.Stdout, string(data))
 }

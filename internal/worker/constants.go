@@ -23,19 +23,6 @@ const (
 )
 
 const (
-	KeyStatus     = "status"
-	KeyReason     = "reason"
-	KeyReasonCode = "reason_code"
-	KeyPID        = "pid"
-	KeyReadyURL   = "ready_url"
-	KeyHash       = "hash"
-	KeyOldPID     = "old_pid"
-	KeyNewPID     = "new_pid"
-	KeyOldCmdline = "old_cmdline"
-	KeyNewCmdline = "new_cmdline"
-)
-
-const (
 	StatusOK    = "ok"
 	StatusError = "error"
 	StatusGone  = "gone"
