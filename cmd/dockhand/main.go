@@ -23,6 +23,8 @@ func main() {
 	switch os.Args[1] {
 	case "bootstrap-repo":
 		os.Exit(runBootstrapRepo(os.Args[2:]))
+	case "run":
+		os.Exit(runRun(os.Args[2:]))
 	case "exec-plan":
 		os.Exit(runExecPlan(os.Args[2:]))
 	case "plan-start":
@@ -103,6 +105,37 @@ func runBootstrapRepo(args []string) int {
 		BranchReady:     result.BranchReady,
 		PreparedRepo:    result.PreparedRepo,
 	})
+	return 0
+}
+
+func runRun(args []string) int {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+
+	payloadFile := fs.String("payload-file", "", "path to worker payload JSON")
+	workspaceDir := fs.String("workspace-dir", "", "workspace root directory")
+	artifactsDir := fs.String("artifacts-dir", "", "artifacts directory")
+	if err := fs.Parse(args); err != nil {
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
+		return 2
+	}
+
+	err := worker.Run(context.Background(), worker.RunOptions{
+		PayloadPath:         *payloadFile,
+		WorkspaceDir:        *workspaceDir,
+		ArtifactsDir:        *artifactsDir,
+		DefaultServicePort:  os.Getenv("NDEV_SERVICE_PORT"),
+		DefaultReadyPath:    os.Getenv("NDEV_SERVICE_READY_PATH"),
+		DefaultReadyTimeout: 180 * time.Second,
+	})
+	if err != nil {
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
+		return 1
+	}
+	emitJSON(struct {
+		Version int    `json:"version"`
+		Status  string `json:"status"`
+	}{Version: responseVersion, Status: worker.StatusOK})
 	return 0
 }
 
@@ -360,47 +393,17 @@ func runControl(args []string) int {
 		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("parse request: %v", err)})
 		return 1
 	}
-
-	var resp *worker.ControlResponse
-
-	switch req.Action {
-	case worker.ActionRestart:
-		command := []string{"mirrord", "exec", "--target", *mirrordTarget, "--", "dockhand", "exec-plan", "--plan-file", *planFile}
-		result, err := worker.Restart(context.Background(), worker.RestartOptions{
-			PIDFile:      *pidFile,
-			Command:      command,
-			ReadyURL:     *readyURL,
-			ReadyTimeout: *readyTimeout,
-			LogFile:      *logFile,
-			RepoDir:      *repoDir,
-			Profile:      worker.RuntimeProfile(*profile),
-		})
-		if err != nil {
-			var supErr *worker.SuperviseError
-			errCode := "restart.failed"
-			if errors.As(err, &supErr) {
-				errCode = "restart." + string(supErr.Code)
-			}
-			resp = worker.NewControlErrorResponse(&req, errCode, err.Error())
-		} else {
-			resp = worker.NewControlResponse(&req, worker.StatusOK)
-			_ = resp.SetResult(worker.RestartActionResult{
-				OldPID:          result.OldPID,
-				NewPID:          result.NewPID,
-				URL:             *serviceURL,
-				ReadyURL:        result.ReadyURL,
-				OldSourceHash:   result.OldSourceHash,
-				NewSourceHash:   result.NewSourceHash,
-				OldCmdline:      result.OldCmdline,
-				NewCmdline:      result.NewCmdline,
-				StatusCode:      result.Probe.StatusCode,
-				ResponseHeaders: result.Probe.Headers,
-				ResponseBody:    result.Probe.Body,
-			})
-		}
-	default:
-		resp = worker.NewControlErrorResponse(&req, "unsupported_action", fmt.Sprintf("unsupported control action %q", req.Action))
-	}
+	command := []string{"mirrord", "exec", "--target", *mirrordTarget, "--", "dockhand", "exec-plan", "--plan-file", *planFile}
+	resp := worker.ExecuteControl(context.Background(), &req, worker.ControlExecOptions{
+		Command:      command,
+		PIDFile:      *pidFile,
+		ServiceURL:   *serviceURL,
+		ReadyURL:     *readyURL,
+		ReadyTimeout: *readyTimeout,
+		LogFile:      *logFile,
+		RepoDir:      *repoDir,
+		Profile:      worker.RuntimeProfile(*profile),
+	})
 
 	respData, err := json.Marshal(resp)
 	if err != nil {
@@ -508,6 +511,7 @@ func printUsage() {
 dockhand is a small process supervisor for agent-worker images.
 
 Usage:
+  dockhand run --payload-file PATH --workspace-dir PATH --artifacts-dir PATH
   dockhand exec-plan [--plan-file PATH] (reads plan JSON from stdin or file, executes it)
   dockhand supervise --ready-url URL [--ready-timeout DURATION] [--pid-file PATH] [--log-file PATH] -- <command...>
   dockhand terminate --pid PID [--grace DURATION]

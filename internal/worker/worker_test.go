@@ -3,10 +3,12 @@ package worker
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -205,6 +207,19 @@ func waitForPIDFile(t *testing.T, path string, timeout time.Duration) int {
 	}
 	t.Fatalf("timed out waiting for pid file %q", path)
 	return 0
+}
+
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for file %q", path)
 }
 
 func waitForProcessExit(t *testing.T, pid int, timeout time.Duration) {
@@ -521,6 +536,165 @@ func TestHashMissingDir(t *testing.T) {
 	if h != "" {
 		t.Fatalf("expected empty hash for missing dir, got %q", h)
 	}
+}
+
+func TestRunServiceModeBootstrapsStartsAndHandlesRestart(t *testing.T) {
+	t.Parallel()
+
+	readyURL := helperReadyURL(t)
+	parsedURL, err := url.Parse(readyURL)
+	if err != nil {
+		t.Fatalf("url.Parse(): %v", err)
+	}
+	_, port, err := net.SplitHostPort(parsedURL.Host)
+	if err != nil {
+		t.Fatalf("net.SplitHostPort(): %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	remoteRepo := filepath.Join(tmpDir, "remote-repo")
+	createTestGitRepo(t, remoteRepo)
+
+	payload := WorkerPayload{
+		RunID:               "run-1",
+		Branch:              "agent/test-branch",
+		Services:            []string{"noona-api"},
+		ServicePlan:         []string{"service plan"},
+		VerificationProfile: "smoke",
+		VerificationPlan:    []string{"verification plan"},
+		Mode:                "service",
+		Repos:               []string{"noona-api"},
+		RepoSpecs: []RepoSpec{{
+			Name: "noona-api",
+			URL:  remoteRepo,
+			Path: filepath.Join(tmpDir, "workspace", "noona-api"),
+		}},
+		ServiceSpecs: []ServiceSpec{{
+			Name:                    "noona-api",
+			ServiceName:             "noona-api",
+			Repo:                    "noona-api",
+			Workdir:                 filepath.Join(tmpDir, "workspace", "noona-api"),
+			RuntimeProfile:          string(ProfileGoHTTP),
+			Target:                  "deploy/noona-api",
+			Entrypoint:              "./cmd/noona-api/main.go",
+			ReadinessPath:           "/healthz",
+			StartStrategy:           string(StrategyGoRun),
+			DevPort:                 mustAtoi(t, port),
+			ReadinessTimeoutSeconds: 5,
+		}},
+	}
+	payloadPath := filepath.Join(tmpDir, "payload.json")
+	payloadData, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal(payload): %v", err)
+	}
+	if err := os.WriteFile(payloadPath, payloadData, 0o644); err != nil {
+		t.Fatalf("WriteFile(payload): %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- Run(ctx, RunOptions{
+			PayloadPath:  payloadPath,
+			WorkspaceDir: filepath.Join(tmpDir, "workspace"),
+			ArtifactsDir: filepath.Join(tmpDir, "artifacts"),
+			PlanCommandBuilder: func(planFile, target string) []string {
+				return helperCommand("serve", readyURL)
+			},
+		})
+	}()
+
+	readyPath := filepath.Join(tmpDir, "artifacts", "service-ready.json")
+	if err := waitForFileContainsJSONField(readyPath, "status", "ready", 5*time.Second); err != nil {
+		t.Fatalf("wait for service-ready.json: %v", err)
+	}
+
+	controlDir := filepath.Join(tmpDir, "artifacts", "control")
+	requestPath := filepath.Join(controlDir, "restart.request")
+	responsePath := filepath.Join(controlDir, "restart.response")
+	request := ControlRequest{Version: 1, RequestID: "req-1", Action: ActionRestart, Service: "noona-api"}
+	requestData, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("json.Marshal(request): %v", err)
+	}
+	if err := os.WriteFile(requestPath, requestData, 0o644); err != nil {
+		t.Fatalf("WriteFile(request): %v", err)
+	}
+	waitForFile(t, responsePath, 5*time.Second)
+	responseData, err := os.ReadFile(responsePath)
+	if err != nil {
+		t.Fatalf("ReadFile(response): %v", err)
+	}
+	var response ControlResponse
+	if err := json.Unmarshal(responseData, &response); err != nil {
+		t.Fatalf("json.Unmarshal(response): %v", err)
+	}
+	if response.Status != StatusOK {
+		t.Fatalf("expected ok restart response, got %+v", response)
+	}
+
+	cancel()
+	select {
+	case err := <-runErrCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
+func createTestGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", "noona-api"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(go.mod): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "noona-api", "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(main.go): %v", err)
+	}
+	cmd := exec.Command("git", "init", dir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	commit := exec.Command("git", "-C", dir, "add", ".")
+	if output, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, output)
+	}
+	commit = exec.Command("git", "-C", dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init")
+	if output, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, output)
+	}
+}
+
+func waitForFileContainsJSONField(path, field, want string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			var payload map[string]any
+			if err := json.Unmarshal(data, &payload); err == nil {
+				if got, ok := payload[field].(string); ok && got == want {
+					return nil
+				}
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for %q to have %s=%q", path, field, want)
+}
+
+func mustAtoi(t *testing.T, value string) int {
+	t.Helper()
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		t.Fatalf("strconv.Atoi(%q): %v", value, err)
+	}
+	return n
 }
 
 func TestHashDeterministic(t *testing.T) {
