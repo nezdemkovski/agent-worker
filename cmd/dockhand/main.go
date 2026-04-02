@@ -221,7 +221,7 @@ func runSupervise(args []string) int {
 	}
 
 	emitJSON(superviseResponse{
-		Version: responseVersion,
+		Version:         responseVersion,
 		Status:          worker.StatusOK,
 		PID:             result.PID,
 		ReadyURL:        result.ReadyURL,
@@ -257,7 +257,7 @@ func runTerminate(args []string) int {
 	emitJSON(terminateResponse{
 		Version: responseVersion,
 		Status:  worker.StatusOK,
-		PID:    *pid,
+		PID:     *pid,
 	})
 	return 0
 }
@@ -296,8 +296,8 @@ func runMonitor(args []string) int {
 
 	emitJSON(monitorResponse{
 		Version: responseVersion,
-		Status: worker.StatusGone,
-		PID:    *pid,
+		Status:  worker.StatusGone,
+		PID:     *pid,
 	})
 	return 0
 }
@@ -323,7 +323,7 @@ func runHash(args []string) int {
 	emitJSON(hashResponse{
 		Version: responseVersion,
 		Status:  worker.StatusOK,
-		Hash:   hash,
+		Hash:    hash,
 	})
 	return 0
 }
@@ -342,6 +342,7 @@ func runControl(args []string) int {
 	profile := fs.String("profile", "", "runtime profile for source hash")
 	planFile := fs.String("plan-file", "", "service start plan JSON file")
 	mirrordTarget := fs.String("mirrord-target", "", "mirrord target")
+	serviceURL := fs.String("service-url", "", "service base URL")
 
 	if err := fs.Parse(args); err != nil {
 		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
@@ -384,14 +385,17 @@ func runControl(args []string) int {
 		} else {
 			resp = worker.NewControlResponse(&req, worker.StatusOK)
 			_ = resp.SetResult(worker.RestartActionResult{
-				OldPID:        result.OldPID,
-				NewPID:        result.NewPID,
-				URL:           *readyURL,
-				ReadyURL:      result.ReadyURL,
-				OldSourceHash: result.OldSourceHash,
-				NewSourceHash: result.NewSourceHash,
-				OldCmdline:    result.OldCmdline,
-				NewCmdline:    result.NewCmdline,
+				OldPID:          result.OldPID,
+				NewPID:          result.NewPID,
+				URL:             *serviceURL,
+				ReadyURL:        result.ReadyURL,
+				OldSourceHash:   result.OldSourceHash,
+				NewSourceHash:   result.NewSourceHash,
+				OldCmdline:      result.OldCmdline,
+				NewCmdline:      result.NewCmdline,
+				StatusCode:      result.Probe.StatusCode,
+				ResponseHeaders: result.Probe.Headers,
+				ResponseBody:    result.Probe.Body,
 			})
 		}
 	default:

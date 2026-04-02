@@ -35,14 +35,17 @@ type ControlError struct {
 }
 
 type RestartActionResult struct {
-	OldPID        int    `json:"old_pid"`
-	NewPID        int    `json:"new_pid"`
-	URL           string `json:"url"`
-	ReadyURL      string `json:"ready_url"`
-	OldSourceHash string `json:"old_source_hash"`
-	NewSourceHash string `json:"new_source_hash"`
-	OldCmdline    string `json:"old_cmdline"`
-	NewCmdline    string `json:"new_cmdline"`
+	OldPID          int    `json:"old_pid"`
+	NewPID          int    `json:"new_pid"`
+	URL             string `json:"url"`
+	ReadyURL        string `json:"ready_url"`
+	OldSourceHash   string `json:"old_source_hash"`
+	NewSourceHash   string `json:"new_source_hash"`
+	OldCmdline      string `json:"old_cmdline"`
+	NewCmdline      string `json:"new_cmdline"`
+	StatusCode      int    `json:"status_code,omitempty"`
+	ResponseHeaders string `json:"response_headers,omitempty"`
+	ResponseBody    string `json:"response_body,omitempty"`
 }
 
 func NewControlResponse(req *ControlRequest, status string) *ControlResponse {
