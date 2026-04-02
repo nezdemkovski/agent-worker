@@ -93,10 +93,14 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(payload.Mode) != string(RunModeService) {
-		return fmt.Errorf("dockhand run currently supports service mode only")
+	switch strings.TrimSpace(payload.Mode) {
+	case string(RunModeService):
+		return runServiceMode(ctx, payload, opts)
+	case string(RunModeVerify), "":
+		return runVerifyMode(ctx, payload, opts)
+	default:
+		return fmt.Errorf("unsupported run mode %q", payload.Mode)
 	}
-	return runServiceMode(ctx, payload, opts)
 }
 
 func runServiceMode(ctx context.Context, payload *WorkerPayload, opts RunOptions) error {

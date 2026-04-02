@@ -132,6 +132,70 @@ exit 0
 	}
 }
 
+func TestBootstrapRepoSmokeModeSkipsDependencyBootstrap(t *testing.T) {
+	root := t.TempDir()
+	binDir := filepath.Join(root, "bin")
+	repoDir := filepath.Join(root, "workspace", "repo1")
+	pnpmStore := filepath.Join(root, "pnpm", "store")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "go.mod"), []byte("module test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "pnpm-lock.yaml"), []byte("lockfileVersion: 9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "package.json"), []byte(`{"name":"repo1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(pnpmStore, "v3", "projects", "stale"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeScript(t, filepath.Join(binDir, "git"), `#!/bin/sh
+exit 0
+`)
+	writeScript(t, filepath.Join(binDir, "go"), `#!/bin/sh
+echo unexpected-go-call >&2
+exit 99
+`)
+	writeScript(t, filepath.Join(binDir, "pnpm"), `#!/bin/sh
+echo unexpected-pnpm-call >&2
+exit 99
+`)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := BootstrapRepo(BootstrapRepoOptions{
+		Repo:         "repo1",
+		RepoDir:      repoDir,
+		RemoteURL:    "https://example.invalid/repo1.git",
+		Branch:       "agent/test-branch",
+		RunMode:      RunModeSmoke,
+		PNPMStoreDir: pnpmStore,
+		PNPMStateDir: filepath.Join(root, "pnpm", "state"),
+	})
+	if err != nil {
+		t.Fatalf("BootstrapRepo() error = %v", err)
+	}
+
+	if !strings.Contains(result.ClonePlan[0], "git clone --depth 1") {
+		t.Fatalf("expected shallow clone plan for smoke mode, got %q", result.ClonePlan[0])
+	}
+	if !containsLine(result.BootstrapResult, "SKIP repo1: smoke verification skips go module bootstrap") {
+		t.Fatalf("expected smoke go bootstrap skip marker, got %+v", result.BootstrapResult)
+	}
+	if !containsLine(result.BootstrapResult, "SKIP repo1: smoke verification skips pnpm bootstrap") {
+		t.Fatalf("expected smoke pnpm bootstrap skip marker, got %+v", result.BootstrapResult)
+	}
+	if dirEntries, _ := os.ReadDir(filepath.Join(pnpmStore, "v3", "projects")); len(dirEntries) != 0 {
+		t.Fatalf("expected stale project links to be removed, got %d entries", len(dirEntries))
+	}
+}
+
 func TestBootstrapRepoCloneFailureIsFatal(t *testing.T) {
 	root := t.TempDir()
 	binDir := filepath.Join(root, "bin")

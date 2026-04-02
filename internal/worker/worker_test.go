@@ -689,6 +689,141 @@ func TestRunServiceModeBootstrapsStartsAndHandlesRestart(t *testing.T) {
 	}
 }
 
+func TestRunVerifyModeSmokeBootstrapsAndSucceeds(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	remoteRepo := filepath.Join(tmpDir, "remote-repo")
+	createTestGitRepo(t, remoteRepo)
+
+	payload := WorkerPayload{
+		RunID:               "run-verify-1",
+		Branch:              "agent/test-verify-branch",
+		VerificationProfile: "smoke",
+		VerificationPlan:    []string{"verification plan"},
+		Mode:                "verify",
+		Repos:               []string{"noona-api"},
+		RepoSpecs: []RepoSpec{{
+			Name: "noona-api",
+			URL:  remoteRepo,
+			Path: filepath.Join(tmpDir, "workspace", "noona-api"),
+		}},
+	}
+	payloadPath := filepath.Join(tmpDir, "payload.json")
+	payloadData, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal(payload): %v", err)
+	}
+	if err := os.WriteFile(payloadPath, payloadData, 0o644); err != nil {
+		t.Fatalf("WriteFile(payload): %v", err)
+	}
+
+	if err := Run(context.Background(), RunOptions{
+		PayloadPath:  payloadPath,
+		WorkspaceDir: filepath.Join(tmpDir, "workspace"),
+		ArtifactsDir: filepath.Join(tmpDir, "artifacts"),
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	workspaceManifest, err := os.ReadFile(filepath.Join(tmpDir, "artifacts", "workspace.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile(workspace.txt): %v", err)
+	}
+	if strings.TrimSpace(string(workspaceManifest)) != "noona-api" {
+		t.Fatalf("unexpected workspace manifest: %q", string(workspaceManifest))
+	}
+
+	var verificationLog EventLog
+	verificationData, err := os.ReadFile(filepath.Join(tmpDir, "artifacts", "verification-result.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(verification-result.json): %v", err)
+	}
+	if err := json.Unmarshal(verificationData, &verificationLog); err != nil {
+		t.Fatalf("json.Unmarshal(verification-result.json): %v", err)
+	}
+	if !hasEventCode(verificationLog.Events, CodeVerificationSmoke) {
+		t.Fatalf("expected verification smoke event, got %+v", verificationLog.Events)
+	}
+	if !hasEventCode(verificationLog.Events, CodeVerificationOK) {
+		t.Fatalf("expected verification ok event, got %+v", verificationLog.Events)
+	}
+
+	var mirrordLog EventLog
+	mirrordData, err := os.ReadFile(filepath.Join(tmpDir, "artifacts", "mirrord-result.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(mirrord-result.json): %v", err)
+	}
+	if err := json.Unmarshal(mirrordData, &mirrordLog); err != nil {
+		t.Fatalf("json.Unmarshal(mirrord-result.json): %v", err)
+	}
+	if !hasEventCode(mirrordLog.Events, CodeMirrordSkip) {
+		t.Fatalf("expected mirrord skip event, got %+v", mirrordLog.Events)
+	}
+}
+
+func TestRunVerifyModeSmokeIgnoresMirrordProbeFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	remoteRepo := filepath.Join(tmpDir, "remote-repo")
+	createTestGitRepo(t, remoteRepo)
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(bin): %v", err)
+	}
+	writeScript(t, filepath.Join(binDir, "mirrord"), `#!/bin/sh
+echo no ready pod >&2
+exit 23
+`)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	payload := WorkerPayload{
+		RunID:               "run-verify-smoke-mirrord",
+		Branch:              "agent/test-verify-branch",
+		VerificationProfile: "smoke",
+		Mode:                "verify",
+		Repos:               []string{"noona-api"},
+		RepoSpecs: []RepoSpec{{
+			Name: "noona-api",
+			URL:  remoteRepo,
+			Path: filepath.Join(tmpDir, "workspace", "noona-api"),
+		}},
+		Services: []string{"noona-api"},
+		ServiceSpecs: []ServiceSpec{{
+			Name:    "noona-api",
+			Target:  "deploy/noona-api",
+			Workdir: filepath.Join(tmpDir, "workspace", "noona-api"),
+		}},
+	}
+	payloadPath := filepath.Join(tmpDir, "payload.json")
+	payloadData, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal(payload): %v", err)
+	}
+	if err := os.WriteFile(payloadPath, payloadData, 0o644); err != nil {
+		t.Fatalf("WriteFile(payload): %v", err)
+	}
+
+	if err := Run(context.Background(), RunOptions{
+		PayloadPath:  payloadPath,
+		WorkspaceDir: filepath.Join(tmpDir, "workspace"),
+		ArtifactsDir: filepath.Join(tmpDir, "artifacts"),
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var mirrordLog EventLog
+	mirrordData, err := os.ReadFile(filepath.Join(tmpDir, "artifacts", "mirrord-result.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(mirrord-result.json): %v", err)
+	}
+	if err := json.Unmarshal(mirrordData, &mirrordLog); err != nil {
+		t.Fatalf("json.Unmarshal(mirrord-result.json): %v", err)
+	}
+	if !hasEventCode(mirrordLog.Events, CodeMirrordFail) {
+		t.Fatalf("expected mirrord fail event, got %+v", mirrordLog.Events)
+	}
+}
+
 func createTestGitRepo(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, "cmd", "noona-api"), 0o755); err != nil {
@@ -712,6 +847,15 @@ func createTestGitRepo(t *testing.T, dir string) {
 	if output, err := commit.CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v\n%s", err, output)
 	}
+}
+
+func hasEventCode(events []Event, code EventCode) bool {
+	for _, event := range events {
+		if event.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func waitForFileContainsJSONField(path, field, want string, timeout time.Duration) error {

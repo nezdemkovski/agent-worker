@@ -15,6 +15,7 @@ type RunMode string
 const (
 	RunModeService RunMode = "service"
 	RunModeVerify  RunMode = "verify"
+	RunModeSmoke   RunMode = "smoke"
 )
 
 type BootstrapRepoOptions struct {
@@ -50,7 +51,7 @@ func BootstrapRepo(opts BootstrapRepoOptions) (*BootstrapRepoResult, error) {
 		return result, fmt.Errorf("mkdir repo dir: %w", err)
 	}
 
-	shallow := opts.RunMode == RunModeService
+	shallow := opts.RunMode == RunModeService || opts.RunMode == RunModeSmoke
 	clonePlan := fmt.Sprintf("git clone %s %s", opts.RemoteURL, opts.RepoDir)
 	if shallow {
 		clonePlan = fmt.Sprintf("git clone --depth 1 %s %s", opts.RemoteURL, opts.RepoDir)
@@ -108,6 +109,9 @@ func BootstrapRepo(opts BootstrapRepoOptions) (*BootstrapRepoResult, error) {
 		if opts.RunMode == RunModeService {
 			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("defer go module bootstrap for service startup: %s", opts.RepoDir))
 			result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("SKIP %s: defer go module bootstrap to service startup", opts.Repo))
+		} else if opts.RunMode == RunModeSmoke {
+			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip go module bootstrap for smoke verification: %s", opts.RepoDir))
+			result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("SKIP %s: smoke verification skips go module bootstrap", opts.Repo))
 		} else {
 			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("go -C %s mod download", opts.RepoDir))
 			if commandExists("go") {
@@ -126,6 +130,8 @@ func BootstrapRepo(opts BootstrapRepoOptions) (*BootstrapRepoResult, error) {
 	if fileExists(filepath.Join(opts.RepoDir, "pnpm-lock.yaml")) {
 		if opts.RunMode == RunModeService {
 			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("pnpm --store-dir %s --config.state-dir %s --dir %s install --ignore-scripts", pnpmStoreDir(opts.PNPMStoreDir), pnpmStateDir(opts.PNPMStateDir), opts.RepoDir))
+		} else if opts.RunMode == RunModeSmoke {
+			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip pnpm bootstrap for smoke verification: %s", opts.RepoDir))
 		} else {
 			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("pnpm --store-dir %s --config.state-dir %s --dir %s fetch", pnpmStoreDir(opts.PNPMStoreDir), pnpmStateDir(opts.PNPMStateDir), opts.RepoDir))
 		}
@@ -138,6 +144,8 @@ func BootstrapRepo(opts BootstrapRepoOptions) (*BootstrapRepoResult, error) {
 				if err != nil {
 					result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("FAIL %s: pnpm install --ignore-scripts", opts.Repo))
 				}
+			} else if opts.RunMode == RunModeSmoke {
+				result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("SKIP %s: smoke verification skips pnpm bootstrap", opts.Repo))
 			} else {
 				result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("PNPM_FETCH %s", opts.Repo))
 				out, err := runCommand("", "pnpm", "--store-dir", pnpmStoreDir(opts.PNPMStoreDir), "--config.state-dir="+pnpmStateDir(opts.PNPMStateDir), "--dir", opts.RepoDir, "fetch")
@@ -150,17 +158,22 @@ func BootstrapRepo(opts BootstrapRepoOptions) (*BootstrapRepoResult, error) {
 			result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("SKIP %s: pnpm unavailable", opts.Repo))
 		}
 	} else if fileExists(filepath.Join(opts.RepoDir, "package.json")) {
-		result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("pnpm --store-dir %s --config.state-dir %s --dir %s install --ignore-scripts", pnpmStoreDir(opts.PNPMStoreDir), pnpmStateDir(opts.PNPMStateDir), opts.RepoDir))
-		if commandExists("pnpm") {
-			result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("PNPM_INSTALL %s", opts.Repo))
-			_ = cleanupPNPMProjectLinks(pnpmStoreDir(opts.PNPMStoreDir))
-			out, err := runCommand("", "pnpm", "--store-dir", pnpmStoreDir(opts.PNPMStoreDir), "--config.state-dir="+pnpmStateDir(opts.PNPMStateDir), "--dir", opts.RepoDir, "install", "--ignore-scripts")
-			result.BootstrapResult = append(result.BootstrapResult, out...)
-			if err != nil {
-				result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("FAIL %s: pnpm install --ignore-scripts", opts.Repo))
-			}
+		if opts.RunMode == RunModeSmoke {
+			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("skip pnpm bootstrap for smoke verification: %s", opts.RepoDir))
+			result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("SKIP %s: smoke verification skips pnpm bootstrap", opts.Repo))
 		} else {
-			result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("SKIP %s: pnpm unavailable", opts.Repo))
+			result.BootstrapPlan = append(result.BootstrapPlan, fmt.Sprintf("pnpm --store-dir %s --config.state-dir %s --dir %s install --ignore-scripts", pnpmStoreDir(opts.PNPMStoreDir), pnpmStateDir(opts.PNPMStateDir), opts.RepoDir))
+			if commandExists("pnpm") {
+				result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("PNPM_INSTALL %s", opts.Repo))
+				_ = cleanupPNPMProjectLinks(pnpmStoreDir(opts.PNPMStoreDir))
+				out, err := runCommand("", "pnpm", "--store-dir", pnpmStoreDir(opts.PNPMStoreDir), "--config.state-dir="+pnpmStateDir(opts.PNPMStateDir), "--dir", opts.RepoDir, "install", "--ignore-scripts")
+				result.BootstrapResult = append(result.BootstrapResult, out...)
+				if err != nil {
+					result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("FAIL %s: pnpm install --ignore-scripts", opts.Repo))
+				}
+			} else {
+				result.BootstrapResult = append(result.BootstrapResult, fmt.Sprintf("SKIP %s: pnpm unavailable", opts.Repo))
+			}
 		}
 	}
 
