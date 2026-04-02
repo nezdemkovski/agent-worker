@@ -20,9 +20,11 @@ type RestartOptions struct {
 
 // RestartResult holds the outcome of a successful Restart call.
 type RestartResult struct {
-	OldPID   int
-	NewPID   int
-	ReadyURL string
+	OldPID     int
+	NewPID     int
+	ReadyURL   string
+	OldCmdline string
+	NewCmdline string
 }
 
 // Restart terminates the process recorded in opts.PIDFile (if any), then
@@ -35,6 +37,7 @@ func Restart(ctx context.Context, opts RestartOptions) (*RestartResult, error) {
 	}
 
 	oldPID := readPIDFile(opts.PIDFile)
+	oldCmdline := pidCmdline(oldPID)
 	if oldPID > 0 {
 		// best-effort: process may already be dead
 		_ = terminateProcessTree(oldPID, opts.Grace)
@@ -51,7 +54,13 @@ func Restart(ctx context.Context, opts RestartOptions) (*RestartResult, error) {
 		return nil, err
 	}
 
-	return &RestartResult{OldPID: oldPID, NewPID: result.PID, ReadyURL: result.ReadyURL}, nil
+	return &RestartResult{
+		OldPID:     oldPID,
+		NewPID:     result.PID,
+		ReadyURL:   result.ReadyURL,
+		OldCmdline: oldCmdline,
+		NewCmdline: pidCmdline(result.PID),
+	}, nil
 }
 
 func readPIDFile(path string) int {

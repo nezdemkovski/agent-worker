@@ -161,6 +161,8 @@ func runRestart(args []string) int {
 	printKV("old_pid", fmt.Sprintf("%d", result.OldPID))
 	printKV("new_pid", fmt.Sprintf("%d", result.NewPID))
 	printKV("ready_url", result.ReadyURL)
+	printKV("old_cmdline", result.OldCmdline)
+	printKV("new_cmdline", result.NewCmdline)
 	return 0
 }
 

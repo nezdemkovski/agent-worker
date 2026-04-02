@@ -75,3 +75,29 @@ func processRunning(pid int) (bool, error) {
 	}
 	return true, nil
 }
+
+// pidCmdline returns the command line of a process by reading /proc/$pid/cmdline
+// on Linux or falling back to ps on other platforms. Returns empty string on any
+// error (process gone, permission denied, etc.).
+func pidCmdline(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+
+	// Try /proc first (Linux).
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err == nil && len(data) > 0 {
+		// /proc/pid/cmdline uses NUL separators between args.
+		return strings.TrimRight(strings.ReplaceAll(string(data), "\x00", " "), " ")
+	}
+
+	// Fallback: ps -o args= -p PID (macOS, BSDs).
+	cmd := exec.Command("ps", "-o", "args=", "-p", fmt.Sprintf("%d", pid))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(stdout.String())
+}
