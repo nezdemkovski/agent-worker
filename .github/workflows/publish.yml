@@ -8,6 +8,9 @@ on:
       - master
     tags:
       - "v*.*.*"
+    paths-ignore:
+      - "**.md"
+      - LICENSE
 
 permissions:
   contents: read
