@@ -25,6 +25,8 @@ func main() {
 		os.Exit(runTerminate(os.Args[2:]))
 	case "restart":
 		os.Exit(runRestart(os.Args[2:]))
+	case "monitor":
+		os.Exit(runMonitor(os.Args[2:]))
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -93,6 +95,29 @@ func runTerminate(args []string) int {
 	}
 
 	printKV("status", "ok")
+	printKV("pid", fmt.Sprintf("%d", *pid))
+	return 0
+}
+
+func runMonitor(args []string) int {
+	fs := flag.NewFlagSet("monitor", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+
+	pid := fs.Int("pid", 0, "pid to monitor")
+	interval := fs.Duration("interval", 500*time.Millisecond, "polling interval")
+	if err := fs.Parse(args); err != nil {
+		printKV("status", "error")
+		printKV("reason", err.Error())
+		return 2
+	}
+
+	if err := worker.Monitor(worker.MonitorOptions{PID: *pid, Interval: *interval}); err != nil {
+		printKV("status", "error")
+		printKV("reason", err.Error())
+		return 1
+	}
+
+	printKV("status", "gone")
 	printKV("pid", fmt.Sprintf("%d", *pid))
 	return 0
 }
@@ -169,6 +194,7 @@ Usage:
   dockhand supervise --ready-url URL [--ready-timeout DURATION] [--pid-file PATH] [--log-file PATH] -- <command...>
   dockhand terminate --pid PID [--grace DURATION]
   dockhand restart --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
+  dockhand monitor --pid PID [--interval DURATION]
 `))
 }
 

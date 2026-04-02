@@ -210,6 +210,51 @@ func waitForProcessExit(t *testing.T, pid int, timeout time.Duration) {
 	t.Fatalf("process %d did not exit within %s", pid, timeout)
 }
 
+func TestMonitorExitsWhenProcessDies(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process signals are unix-only")
+	}
+	t.Parallel()
+
+	args := helperCommand("sleep-forever")
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("cmd.Start(): %v", err)
+	}
+	pid := cmd.Process.Pid
+	go func() { _ = cmd.Wait() }()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- Monitor(MonitorOptions{PID: pid, Interval: 50 * time.Millisecond})
+	}()
+
+	// Terminate the process; Monitor should return promptly.
+	if err := Terminate(pid, 2*time.Second); err != nil {
+		t.Fatalf("Terminate(): %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Monitor() error = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Monitor() did not return after process was terminated")
+	}
+}
+
+func TestMonitorReturnsImmediatelyForDeadPID(t *testing.T) {
+	t.Parallel()
+
+	// PID 999999999 is virtually guaranteed not to exist.
+	err := Monitor(MonitorOptions{PID: 999999999, Interval: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("Monitor() error = %v", err)
+	}
+}
+
 func TestRestartTerminatesOldAndStartsNew(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("process group assertions are unix-only")
