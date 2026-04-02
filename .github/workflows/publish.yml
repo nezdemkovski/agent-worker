@@ -8,10 +8,6 @@ on:
       - master
     tags:
       - "v*.*.*"
-    paths:
-      - Dockerfile
-      - .github/workflows/publish.yml
-      - scripts/**
 
 permissions:
   contents: read
