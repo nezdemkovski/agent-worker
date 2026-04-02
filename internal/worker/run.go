@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -479,9 +480,19 @@ func formatEventLogLine(event Event) string {
 
 	var detailParts []string
 	for _, key := range keys {
-		detailParts = append(detailParts, fmt.Sprintf("%s=%s", key, event.Details[key]))
+		detailParts = append(detailParts, fmt.Sprintf("%s=%s", key, formatLogDetailValue(event.Details[key])))
 	}
 	return fmt.Sprintf("%s (%s)", line, strings.Join(detailParts, ", "))
+}
+
+func formatLogDetailValue(value string) string {
+	if value == "" {
+		return `""`
+	}
+	if strings.ContainsAny(value, " ,=()") {
+		return strconv.Quote(value)
+	}
+	return value
 }
 
 func writeLines(path string, lines []string) {

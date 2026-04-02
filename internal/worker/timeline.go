@@ -97,10 +97,26 @@ func describeControlRequest(req *ControlRequest) (string, map[string]string) {
 			if payload.Repo != "" {
 				details["repo"] = payload.Repo
 			}
+			if prompt := summarizePromptForLog(payload.Prompt); prompt != "" {
+				details["prompt"] = prompt
+			}
 			return "received prompt request", details
 		}
 		return "received prompt action", nil
 	default:
 		return "received control action", nil
 	}
+}
+
+func summarizePromptForLog(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return ""
+	}
+	prompt = strings.Join(strings.Fields(prompt), " ")
+	const maxLen = 280
+	if len(prompt) <= maxLen {
+		return prompt
+	}
+	return strings.TrimSpace(prompt[:maxLen-1]) + "…"
 }

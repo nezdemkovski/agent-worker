@@ -323,6 +323,22 @@ func TestDescribeControlRequest(t *testing.T) {
 	}
 }
 
+func TestDescribeControlRequestPromptIncludesPromptPreview(t *testing.T) {
+	req := &ControlRequest{
+		Action:  ActionPrompt,
+		Service: "noona-api",
+		Payload: json.RawMessage(`{"tool":"codex","repo":"noona-api","prompt":"fix login flow and keep tests green"}`),
+	}
+
+	message, details := describeControlRequest(req)
+	if message != "received prompt request" {
+		t.Fatalf("unexpected message %q", message)
+	}
+	if details["prompt"] != "fix login flow and keep tests green" {
+		t.Fatalf("unexpected prompt detail %#v", details)
+	}
+}
+
 func TestExecPlanHonorsExecWorkdir(t *testing.T) {
 	t.Parallel()
 
