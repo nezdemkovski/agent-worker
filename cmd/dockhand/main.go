@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -19,6 +20,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "exec-plan":
+		os.Exit(runExecPlan(os.Args[2:]))
 	case "plan-start":
 		os.Exit(runPlanStart(os.Args[2:]))
 	case "supervise":
@@ -79,6 +82,42 @@ func runPlanStart(args []string) int {
 		StartDescription: plan.StartDescription,
 		Plan:             plan.Plan,
 	})
+	return 0
+}
+
+func runExecPlan(args []string) int {
+	fs := flag.NewFlagSet("exec-plan", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+	planFile := fs.String("plan-file", "", "path to plan JSON file (default: read from stdin)")
+	if err := fs.Parse(args); err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		return 2
+	}
+
+	var planData []byte
+	var err error
+	if *planFile != "" {
+		planData, err = os.ReadFile(*planFile)
+	} else {
+		planData, err = io.ReadAll(os.Stdin)
+	}
+	if err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("read plan: %v", err)})
+		return 1
+	}
+
+	plan, err := worker.ParsePlanJSON(planData)
+	if err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("parse plan: %v", err)})
+		return 1
+	}
+
+	// ExecPlan replaces the process on the final exec step.
+	// If it returns, either all non-exec steps completed or there was an error.
+	if err := worker.ExecPlan(plan); err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		return 1
+	}
 	return 0
 }
 
@@ -311,6 +350,7 @@ func printUsage() {
 dockhand is a small process supervisor for agent-worker images.
 
 Usage:
+  dockhand exec-plan [--plan-file PATH] (reads plan JSON from stdin or file, executes it)
   dockhand supervise --ready-url URL [--ready-timeout DURATION] [--pid-file PATH] [--log-file PATH] -- <command...>
   dockhand terminate --pid PID [--grace DURATION]
   dockhand restart --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
