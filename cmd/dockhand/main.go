@@ -63,7 +63,7 @@ func runBootstrapRepo(args []string) int {
 	pnpmStoreDir := fs.String("pnpm-store-dir", "", "pnpm store dir")
 	pnpmStateDir := fs.String("pnpm-state-dir", "", "pnpm state dir")
 	if err := fs.Parse(args); err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
 		return 2
 	}
 
@@ -78,6 +78,7 @@ func runBootstrapRepo(args []string) int {
 	})
 	if err != nil {
 		emitJSON(bootstrapRepoResponse{
+			Version:         responseVersion,
 			Status:          worker.StatusError,
 			Reason:          err.Error(),
 			ClonePlan:       result.ClonePlan,
@@ -92,6 +93,7 @@ func runBootstrapRepo(args []string) int {
 	}
 
 	emitJSON(bootstrapRepoResponse{
+		Version:         responseVersion,
 		Status:          worker.StatusOK,
 		ClonePlan:       result.ClonePlan,
 		CheckoutResult:  result.CheckoutResult,
@@ -115,7 +117,7 @@ func runPlanStart(args []string) int {
 	strategy := fs.String("start-strategy", "", "requested start strategy")
 	port := fs.String("port", "", "service port")
 	if err := fs.Parse(args); err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
 		return 2
 	}
 
@@ -128,11 +130,12 @@ func runPlanStart(args []string) int {
 		Port:           *port,
 	})
 	if err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
 		return 1
 	}
 
 	emitJSON(startPlanResponse{
+		Version:          responseVersion,
 		Status:           worker.StatusOK,
 		RuntimeProfile:   plan.RuntimeProfile,
 		StartStrategy:    plan.Strategy,
@@ -147,7 +150,7 @@ func runExecPlan(args []string) int {
 	fs.SetOutput(ioDiscard{})
 	planFile := fs.String("plan-file", "", "path to plan JSON file (default: read from stdin)")
 	if err := fs.Parse(args); err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
 		return 2
 	}
 
@@ -159,20 +162,20 @@ func runExecPlan(args []string) int {
 		planData, err = io.ReadAll(os.Stdin)
 	}
 	if err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("read plan: %v", err)})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("read plan: %v", err)})
 		return 1
 	}
 
 	plan, err := worker.ParsePlanJSON(planData)
 	if err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("parse plan: %v", err)})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("parse plan: %v", err)})
 		return 1
 	}
 
 	// ExecPlan replaces the process on the final exec step.
 	// If it returns, either all non-exec steps completed or there was an error.
 	if err := worker.ExecPlan(plan); err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
 		return 1
 	}
 	return 0
@@ -205,8 +208,9 @@ func runSupervise(args []string) int {
 	})
 	if err != nil {
 		response := errorResponse{
-			Status: worker.StatusError,
-			Reason: err.Error(),
+			Version: responseVersion,
+			Status:  worker.StatusError,
+			Reason:  err.Error(),
 		}
 		var supErr *worker.SuperviseError
 		if errors.As(err, &supErr) {
@@ -217,6 +221,7 @@ func runSupervise(args []string) int {
 	}
 
 	emitJSON(superviseResponse{
+		Version: responseVersion,
 		Status:          worker.StatusOK,
 		PID:             result.PID,
 		ReadyURL:        result.ReadyURL,
@@ -250,7 +255,8 @@ func runTerminate(args []string) int {
 	}
 
 	emitJSON(terminateResponse{
-		Status: worker.StatusOK,
+		Version: responseVersion,
+		Status:  worker.StatusOK,
 		PID:    *pid,
 	})
 	return 0
@@ -289,6 +295,7 @@ func runMonitor(args []string) int {
 	}
 
 	emitJSON(monitorResponse{
+		Version: responseVersion,
 		Status: worker.StatusGone,
 		PID:    *pid,
 	})
@@ -314,7 +321,8 @@ func runHash(args []string) int {
 		RuntimeProfile: worker.RuntimeProfile(*profile),
 	})
 	emitJSON(hashResponse{
-		Status: worker.StatusOK,
+		Version: responseVersion,
+		Status:  worker.StatusOK,
 		Hash:   hash,
 	})
 	return 0
@@ -336,19 +344,19 @@ func runControl(args []string) int {
 	mirrordTarget := fs.String("mirrord-target", "", "mirrord target")
 
 	if err := fs.Parse(args); err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: err.Error()})
 		return 2
 	}
 
 	reqData, err := os.ReadFile(*requestFile)
 	if err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("read request: %v", err)})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("read request: %v", err)})
 		return 1
 	}
 
 	var req worker.ControlRequest
 	if err := json.Unmarshal(reqData, &req); err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("parse request: %v", err)})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("parse request: %v", err)})
 		return 1
 	}
 
@@ -392,17 +400,18 @@ func runControl(args []string) int {
 
 	respData, err := json.Marshal(resp)
 	if err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("encode response: %v", err)})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("encode response: %v", err)})
 		return 1
 	}
 	if err := os.WriteFile(*responseFile, respData, 0o644); err != nil {
-		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("write response: %v", err)})
+		emitJSON(errorResponse{Version: responseVersion, Status: worker.StatusError, Reason: fmt.Sprintf("write response: %v", err)})
 		return 1
 	}
 
 	emitJSON(struct {
-		Status string `json:"status"`
-	}{Status: worker.StatusOK})
+		Version int    `json:"version"`
+		Status  string `json:"status"`
+	}{Version: responseVersion, Status: worker.StatusOK})
 	return 0
 }
 
@@ -439,8 +448,9 @@ func runRestart(args []string) int {
 	})
 	if err != nil {
 		response := errorResponse{
-			Status: worker.StatusError,
-			Reason: err.Error(),
+			Version: responseVersion,
+			Status:  worker.StatusError,
+			Reason:  err.Error(),
 		}
 		var supErr *worker.SuperviseError
 		if errors.As(err, &supErr) {
@@ -451,6 +461,7 @@ func runRestart(args []string) int {
 	}
 
 	emitJSON(restartResponse{
+		Version:         responseVersion,
 		Status:          worker.StatusOK,
 		OldPID:          result.OldPID,
 		NewPID:          result.NewPID,

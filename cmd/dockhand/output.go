@@ -8,13 +8,17 @@ import (
 	"github.com/nezdemkovski/agent-worker/internal/worker"
 )
 
+const responseVersion = 1
+
 type errorResponse struct {
+	Version    int               `json:"version"`
 	Status     string            `json:"status"`
 	Reason     string            `json:"reason"`
 	ReasonCode worker.ReasonCode `json:"reason_code,omitempty"`
 }
 
 type superviseResponse struct {
+	Version         int    `json:"version"`
 	Status          string `json:"status"`
 	PID             int    `json:"pid,omitempty"`
 	ReadyURL        string `json:"ready_url,omitempty"`
@@ -24,21 +28,25 @@ type superviseResponse struct {
 }
 
 type terminateResponse struct {
-	Status string `json:"status"`
-	PID    int    `json:"pid,omitempty"`
+	Version int    `json:"version"`
+	Status  string `json:"status"`
+	PID     int    `json:"pid,omitempty"`
 }
 
 type monitorResponse struct {
-	Status string `json:"status"`
-	PID    int    `json:"pid,omitempty"`
+	Version int    `json:"version"`
+	Status  string `json:"status"`
+	PID     int    `json:"pid,omitempty"`
 }
 
 type hashResponse struct {
-	Status string `json:"status"`
-	Hash   string `json:"hash,omitempty"`
+	Version int    `json:"version"`
+	Status  string `json:"status"`
+	Hash    string `json:"hash,omitempty"`
 }
 
 type restartResponse struct {
+	Version         int    `json:"version"`
 	Status          string `json:"status"`
 	OldPID          int    `json:"old_pid,omitempty"`
 	NewPID          int    `json:"new_pid,omitempty"`
@@ -53,6 +61,7 @@ type restartResponse struct {
 }
 
 type startPlanResponse struct {
+	Version          int                    `json:"version"`
 	Status           string                 `json:"status"`
 	RuntimeProfile   string                 `json:"runtime_profile,omitempty"`
 	StartStrategy    string                 `json:"start_strategy,omitempty"`
@@ -61,6 +70,7 @@ type startPlanResponse struct {
 }
 
 type bootstrapRepoResponse struct {
+	Version         int      `json:"version"`
 	Status          string   `json:"status"`
 	Reason          string   `json:"reason,omitempty"`
 	ClonePlan       []string `json:"clone_plan,omitempty"`
@@ -76,8 +86,9 @@ func emitJSON(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		fallback, _ := json.Marshal(errorResponse{
-			Status: worker.StatusError,
-			Reason: "failed to encode JSON output",
+			Version: responseVersion,
+			Status:  worker.StatusError,
+			Reason:  "failed to encode JSON output",
 		})
 		fmt.Fprintln(os.Stdout, string(fallback))
 		return
