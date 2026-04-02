@@ -371,6 +371,98 @@ func TestRestartFailsWhenNewProcessExitsBeforeReady(t *testing.T) {
 	}
 }
 
+func TestHashGoProfile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("readme\n"), 0o644)
+
+	h := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+	if h == "" {
+		t.Fatal("expected non-empty hash for go-http profile")
+	}
+
+	// README.md shouldn't affect hash
+	h2 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+	if h != h2 {
+		t.Fatal("hash should be deterministic")
+	}
+}
+
+func TestHashNodeProfile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "src"), 0o755)
+	os.WriteFile(filepath.Join(dir, "src", "index.ts"), []byte("console.log('hi')\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "Makefile"), []byte("all:\n"), 0o644)
+
+	h := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "node-http"})
+	if h == "" {
+		t.Fatal("expected non-empty hash for node-http profile")
+	}
+}
+
+func TestHashDefaultProfile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "a", "b", "c"), 0o755)
+	os.WriteFile(filepath.Join(dir, "a", "b", "c", "deep.txt"), []byte("deep\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "a", "shallow.txt"), []byte("shallow\n"), 0o644)
+
+	h := Hash(HashOptions{RepoDir: dir, RuntimeProfile: ""})
+	if h == "" {
+		t.Fatal("expected non-empty hash for default profile")
+	}
+}
+
+func TestHashEmptyDir(t *testing.T) {
+	t.Parallel()
+	h := Hash(HashOptions{RepoDir: t.TempDir(), RuntimeProfile: "go-http"})
+	if h != "" {
+		t.Fatalf("expected empty hash for dir with no matching files, got %q", h)
+	}
+}
+
+func TestHashMissingDir(t *testing.T) {
+	t.Parallel()
+	h := Hash(HashOptions{RepoDir: "/nonexistent-dir-12345"})
+	if h != "" {
+		t.Fatalf("expected empty hash for missing dir, got %q", h)
+	}
+}
+
+func TestHashDeterministic(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package b\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+
+	h1 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+	h2 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+	if h1 != h2 {
+		t.Fatalf("hash not deterministic: %q != %q", h1, h2)
+	}
+}
+
+func TestHashChangesWhenContentChanges(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	goFile := filepath.Join(dir, "main.go")
+	os.WriteFile(goFile, []byte("package main\n"), 0o644)
+	h1 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+
+	os.WriteFile(goFile, []byte("package main\nfunc init() {}\n"), 0o644)
+	h2 := Hash(HashOptions{RepoDir: dir, RuntimeProfile: "go-http"})
+
+	if h1 == h2 {
+		t.Fatal("hash should change when file content changes")
+	}
+}
+
 func TestWorkerHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return

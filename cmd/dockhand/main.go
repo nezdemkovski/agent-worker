@@ -27,6 +27,8 @@ func main() {
 		os.Exit(runRestart(os.Args[2:]))
 	case "monitor":
 		os.Exit(runMonitor(os.Args[2:]))
+	case "hash":
+		os.Exit(runHash(os.Args[2:]))
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -122,6 +124,27 @@ func runMonitor(args []string) int {
 	return 0
 }
 
+func runHash(args []string) int {
+	fs := flag.NewFlagSet("hash", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+
+	repoDir := fs.String("repo-dir", "", "repository root directory")
+	profile := fs.String("profile", "", "runtime profile (node-http, go-http, worker-metrics)")
+	if err := fs.Parse(args); err != nil {
+		printKV("status", "error")
+		printKV("reason", err.Error())
+		return 2
+	}
+
+	hash := worker.Hash(worker.HashOptions{
+		RepoDir:        *repoDir,
+		RuntimeProfile: *profile,
+	})
+	printKV("status", "ok")
+	printKV("hash", hash)
+	return 0
+}
+
 func runRestart(args []string) int {
 	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
 	fs.SetOutput(ioDiscard{})
@@ -197,6 +220,7 @@ Usage:
   dockhand terminate --pid PID [--grace DURATION]
   dockhand restart --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
   dockhand monitor --pid PID [--interval DURATION]
+  dockhand hash --repo-dir PATH [--profile PROFILE]
 `))
 }
 
