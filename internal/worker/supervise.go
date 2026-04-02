@@ -23,6 +23,7 @@ type SuperviseOptions struct {
 type SuperviseResult struct {
 	PID      int
 	ReadyURL string
+	Probe    ProbeResult
 }
 
 type SuperviseError struct {
@@ -104,9 +105,9 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (*SuperviseResult, er
 			}
 			return nil, &SuperviseError{Code: ReasonExitedBeforeReady, Err: exitErr}
 		case <-ticker.C:
-			ready, err := isReady(opts.ReadyURL)
-			if err == nil && ready {
-				return &SuperviseResult{PID: pid, ReadyURL: opts.ReadyURL}, nil
+			probe, err := probeReady(opts.ReadyURL)
+			if err == nil && probe.Ready() {
+				return &SuperviseResult{PID: pid, ReadyURL: opts.ReadyURL, Probe: *probe}, nil
 			}
 		case <-timeout.C:
 			_ = terminateProcessTree(pid, 2*time.Second)

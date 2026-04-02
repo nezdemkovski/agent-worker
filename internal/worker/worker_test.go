@@ -43,6 +43,15 @@ func TestSuperviseSucceedsAndWritesArtifacts(t *testing.T) {
 	if result.ReadyURL != readyURL {
 		t.Fatalf("expected ready URL %q, got %q", readyURL, result.ReadyURL)
 	}
+	if result.Probe.StatusCode != 200 {
+		t.Fatalf("expected probe status 200, got %d", result.Probe.StatusCode)
+	}
+	if !strings.Contains(result.Probe.Headers, "HTTP/1.1 200 OK") {
+		t.Fatalf("expected probe status line in headers, got %q", result.Probe.Headers)
+	}
+	if !strings.Contains(result.Probe.Body, "ok") {
+		t.Fatalf("expected probe body content, got %q", result.Probe.Body)
+	}
 
 	pidData, err := os.ReadFile(pidFile)
 	if err != nil {
@@ -331,6 +340,9 @@ func TestRestartTerminatesOldAndStartsNew(t *testing.T) {
 	}
 	if result.ReadyURL != newReadyURL {
 		t.Fatalf("expected ReadyURL=%q, got %q", newReadyURL, result.ReadyURL)
+	}
+	if result.Probe.StatusCode != 200 {
+		t.Fatalf("expected probe status 200, got %d", result.Probe.StatusCode)
 	}
 
 	waitForProcessExit(t, oldPID, 3*time.Second)

@@ -20,13 +20,14 @@ type RestartOptions struct {
 }
 
 type RestartResult struct {
-	OldPID         int
-	NewPID         int
-	ReadyURL       string
-	OldCmdline     string
-	NewCmdline     string
-	OldSourceHash  string
-	NewSourceHash  string
+	OldPID        int
+	NewPID        int
+	ReadyURL      string
+	OldCmdline    string
+	NewCmdline    string
+	OldSourceHash string
+	NewSourceHash string
+	Probe         ProbeResult
 }
 
 func Restart(ctx context.Context, opts RestartOptions) (*RestartResult, error) {
@@ -66,6 +67,7 @@ func Restart(ctx context.Context, opts RestartOptions) (*RestartResult, error) {
 			RepoDir:        opts.RepoDir,
 			RuntimeProfile: opts.Profile,
 		}),
+		Probe: result.Probe,
 	}, nil
 }
 

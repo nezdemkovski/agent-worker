@@ -80,9 +80,12 @@ func runSupervise(args []string) int {
 	}
 
 	emitJSON(superviseResponse{
-		Status:   worker.StatusOK,
-		PID:      result.PID,
-		ReadyURL: result.ReadyURL,
+		Status:          worker.StatusOK,
+		PID:             result.PID,
+		ReadyURL:        result.ReadyURL,
+		StatusCode:      result.Probe.StatusCode,
+		ResponseHeaders: result.Probe.Headers,
+		ResponseBody:    result.Probe.Body,
 	})
 	return 0
 }
@@ -225,14 +228,17 @@ func runRestart(args []string) int {
 	}
 
 	emitJSON(restartResponse{
-		Status:        worker.StatusOK,
-		OldPID:        result.OldPID,
-		NewPID:        result.NewPID,
-		ReadyURL:      result.ReadyURL,
-		OldCmdline:    result.OldCmdline,
-		NewCmdline:    result.NewCmdline,
-		OldSourceHash: result.OldSourceHash,
-		NewSourceHash: result.NewSourceHash,
+		Status:          worker.StatusOK,
+		OldPID:          result.OldPID,
+		NewPID:          result.NewPID,
+		ReadyURL:        result.ReadyURL,
+		OldCmdline:      result.OldCmdline,
+		NewCmdline:      result.NewCmdline,
+		OldSourceHash:   result.OldSourceHash,
+		NewSourceHash:   result.NewSourceHash,
+		StatusCode:      result.Probe.StatusCode,
+		ResponseHeaders: result.Probe.Headers,
+		ResponseBody:    result.Probe.Body,
 	})
 	return 0
 }
