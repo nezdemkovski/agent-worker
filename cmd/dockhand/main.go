@@ -77,6 +77,7 @@ func runPlanStart(args []string) int {
 		StartStrategy:    plan.ResolvedStrategy,
 		StartCommand:     plan.StartCommand,
 		StartDescription: plan.StartDescription,
+		Plan:             plan.Plan,
 	})
 	return 0
 }

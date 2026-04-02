@@ -53,11 +53,12 @@ type restartResponse struct {
 }
 
 type startPlanResponse struct {
-	Status           string `json:"status"`
-	RuntimeProfile   string `json:"runtime_profile,omitempty"`
-	StartStrategy    string `json:"start_strategy,omitempty"`
-	StartCommand     string `json:"start_command,omitempty"`
-	StartDescription string `json:"start_description,omitempty"`
+	Status           string                 `json:"status"`
+	RuntimeProfile   string                 `json:"runtime_profile,omitempty"`
+	StartStrategy    string                 `json:"start_strategy,omitempty"`
+	StartCommand     string                 `json:"start_command,omitempty"`
+	StartDescription string                 `json:"start_description,omitempty"`
+	Plan             *worker.TypedStartPlan `json:"plan,omitempty"`
 }
 
 func emitJSON(v any) {
