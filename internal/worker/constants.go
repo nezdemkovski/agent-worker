@@ -22,6 +22,16 @@ const (
 	ProfileWorkerMetrics RuntimeProfile = "worker-metrics"
 )
 
+type StartStrategy string
+
+const (
+	StrategyGoRun    StartStrategy = "go-run"
+	StrategyAir      StartStrategy = "air"
+	StrategyNpmAuto  StartStrategy = "npm-auto"
+	StrategyPnpmDev  StartStrategy = "pnpm-dev"
+	StrategyPnpmStart StartStrategy = "pnpm-start"
+)
+
 const (
 	StatusOK    = "ok"
 	StatusError = "error"

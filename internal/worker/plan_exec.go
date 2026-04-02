@@ -9,8 +9,6 @@ import (
 	"syscall"
 )
 
-// RunChecks validates all preconditions in a typed plan.
-// Returns nil if all checks pass, or an error describing the first failure.
 func RunChecks(plan *TypedStartPlan) error {
 	for _, c := range plan.Checks {
 		if err := runCheck(c); err != nil {
@@ -22,19 +20,19 @@ func RunChecks(plan *TypedStartPlan) error {
 
 func runCheck(c PlanCheck) error {
 	switch c.Type {
-	case "dir_exists":
+	case CheckDirExists:
 		info, err := os.Stat(c.Path)
 		if err != nil || !info.IsDir() {
-			return fmt.Errorf("check dir_exists failed: %s", c.Path)
+			return fmt.Errorf("check %s failed: %s", c.Type, c.Path)
 		}
-	case "file_exists":
+	case CheckFileExists:
 		info, err := os.Stat(c.Path)
 		if err != nil || info.IsDir() {
-			return fmt.Errorf("check file_exists failed: %s", c.Path)
+			return fmt.Errorf("check %s failed: %s", c.Type, c.Path)
 		}
-	case "command_exists":
+	case CheckCommandExists:
 		if _, err := exec.LookPath(c.Name); err != nil {
-			return fmt.Errorf("check command_exists failed: %s", c.Name)
+			return fmt.Errorf("check %s failed: %s", c.Type, c.Name)
 		}
 	default:
 		return fmt.Errorf("unknown check type: %s", c.Type)
@@ -42,7 +40,6 @@ func runCheck(c PlanCheck) error {
 	return nil
 }
 
-// BuildCommand constructs the command path, argv, and env for a plan step.
 func BuildCommand(step PlanStep, planEnv map[string]string) (string, []string, []string, error) {
 	cmdPath, err := exec.LookPath(step.Command)
 	if err != nil {
@@ -62,8 +59,6 @@ func BuildCommand(step PlanStep, planEnv map[string]string) (string, []string, [
 	return cmdPath, args, env, nil
 }
 
-// ExecStep runs a single plan step. If step.Exec is true, it replaces
-// the current process via syscall.Exec. Otherwise it runs as a subprocess.
 func ExecStep(step PlanStep, planEnv map[string]string) error {
 	cmdPath, args, env, err := BuildCommand(step, planEnv)
 	if err != nil {
@@ -89,8 +84,6 @@ func ExecStep(step PlanStep, planEnv map[string]string) error {
 	return cmd.Run()
 }
 
-// ExecPlan runs a typed start plan: checks → steps (with fallback on failure).
-// The last step marked Exec=true replaces the process.
 func ExecPlan(plan *TypedStartPlan) error {
 	if err := RunChecks(plan); err != nil {
 		return fmt.Errorf("precondition failed: %w", err)
@@ -139,7 +132,6 @@ func setEnvVar(env []string, key, value string) []string {
 	return append(env, prefix+value)
 }
 
-// FormatPlanJSON returns the plan as a JSON string.
 func FormatPlanJSON(plan *TypedStartPlan) (string, error) {
 	data, err := json.Marshal(plan)
 	if err != nil {
@@ -148,7 +140,6 @@ func FormatPlanJSON(plan *TypedStartPlan) (string, error) {
 	return string(data), nil
 }
 
-// ParsePlanJSON parses a typed plan from JSON.
 func ParsePlanJSON(data []byte) (*TypedStartPlan, error) {
 	var plan TypedStartPlan
 	if err := json.Unmarshal(data, &plan); err != nil {

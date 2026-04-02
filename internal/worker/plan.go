@@ -1,8 +1,13 @@
 package worker
 
-// TypedStartPlan is a structured, JSON-serializable service startup plan.
-// It replaces opaque shell command strings with explicit checks, steps,
-// environment, and fallback behavior.
+type CheckType string
+
+const (
+	CheckDirExists     CheckType = "dir_exists"
+	CheckFileExists    CheckType = "file_exists"
+	CheckCommandExists CheckType = "command_exists"
+)
+
 type TypedStartPlan struct {
 	RuntimeProfile string            `json:"runtime_profile"`
 	Strategy       string            `json:"strategy"`
@@ -14,18 +19,16 @@ type TypedStartPlan struct {
 	Description    string            `json:"description"`
 }
 
-// PlanCheck is a precondition that must pass before steps execute.
 type PlanCheck struct {
-	Type string `json:"type"` // "dir_exists", "file_exists", "command_exists"
-	Path string `json:"path,omitempty"`
-	Name string `json:"name,omitempty"`
+	Type CheckType `json:"type"`
+	Path string    `json:"path,omitempty"`
+	Name string    `json:"name,omitempty"`
 }
 
-// PlanStep is a single command to run as part of the startup plan.
 type PlanStep struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Workdir string            `json:"workdir,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
-	Exec    bool              `json:"exec,omitempty"` // replace the current process (last step)
+	Exec    bool              `json:"exec,omitempty"`
 }

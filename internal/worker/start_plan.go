@@ -35,13 +35,13 @@ func PlanStart(opts StartPlanOptions) (StartPlan, error) {
 	}
 
 	profile := opts.RuntimeProfile
-	strategy := strings.TrimSpace(opts.StartStrategy)
+	strategy := StartStrategy(strings.TrimSpace(opts.StartStrategy))
 	if strategy == "" {
 		switch profile {
 		case ProfileGoHTTP:
-			strategy = "go-run"
+			strategy = StrategyGoRun
 		case ProfileNodeHTTP:
-			strategy = "npm-auto"
+			strategy = StrategyNpmAuto
 		}
 	}
 
@@ -55,7 +55,7 @@ func PlanStart(opts StartPlanOptions) (StartPlan, error) {
 	}
 }
 
-func planGoHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
+func planGoHTTP(opts StartPlanOptions, strategy StartStrategy) (StartPlan, error) {
 	entrypoint := opts.EntryPoint
 	if entrypoint == "" {
 		entrypoint = fmt.Sprintf("./cmd/%s/main.go", opts.Service)
@@ -67,19 +67,19 @@ func planGoHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
 		return StartPlan{}, fmt.Errorf("go unavailable")
 	}
 
-	plan := StartPlan{RuntimeProfile: opts.RuntimeProfile, ResolvedStrategy: strategy}
+	plan := StartPlan{RuntimeProfile: opts.RuntimeProfile, ResolvedStrategy: string(strategy)}
 
 	checks := []PlanCheck{
-		{Type: "file_exists", Path: filepath.Join(opts.WorkDir, strings.TrimPrefix(entrypoint, "./"))},
-		{Type: "command_exists", Name: "go"},
+		{Type: CheckFileExists, Path: filepath.Join(opts.WorkDir, strings.TrimPrefix(entrypoint, "./"))},
+		{Type: CheckCommandExists, Name: "go"},
 	}
 
 	switch strategy {
-	case "air":
+	case StrategyAir:
 		if _, err := exec.LookPath("air"); err != nil {
 			return StartPlan{}, fmt.Errorf("air unavailable")
 		}
-		checks = append(checks, PlanCheck{Type: "command_exists", Name: "air"})
+		checks = append(checks, PlanCheck{Type: CheckCommandExists, Name: "air"})
 		plan.StartCommand = fmt.Sprintf(`set -eu
 cd %s
 mkdir -p .ndev-air
@@ -102,7 +102,7 @@ exec air -c .ndev-air.toml`, shellQuote(opts.WorkDir), entrypoint, shellQuote(op
 		plan.StartDescription = fmt.Sprintf("cd %s && write .ndev-air.toml && air -c .ndev-air.toml", opts.WorkDir)
 		plan.Plan = &TypedStartPlan{
 			RuntimeProfile: string(opts.RuntimeProfile),
-			Strategy:       "air",
+			Strategy:       string(StrategyAir),
 			Workdir:        opts.WorkDir,
 			Checks:         checks,
 			Steps: []PlanStep{
@@ -110,13 +110,13 @@ exec air -c .ndev-air.toml`, shellQuote(opts.WorkDir), entrypoint, shellQuote(op
 			},
 			Description: plan.StartDescription,
 		}
-	case "go-run", "":
-		plan.ResolvedStrategy = "go-run"
+	case StrategyGoRun, "":
+		plan.ResolvedStrategy = string(StrategyGoRun)
 		plan.StartCommand = fmt.Sprintf("set -eu && cd %s && exec go run %s --port %s", shellQuote(opts.WorkDir), shellQuote(entrypoint), shellQuote(opts.Port))
 		plan.StartDescription = fmt.Sprintf("cd %s && go run %s --port %s", opts.WorkDir, entrypoint, opts.Port)
 		plan.Plan = &TypedStartPlan{
 			RuntimeProfile: string(opts.RuntimeProfile),
-			Strategy:       "go-run",
+			Strategy:       string(StrategyGoRun),
 			Workdir:        opts.WorkDir,
 			Checks:         checks,
 			Steps: []PlanStep{
@@ -130,7 +130,7 @@ exec air -c .ndev-air.toml`, shellQuote(opts.WorkDir), entrypoint, shellQuote(op
 	return plan, nil
 }
 
-func planNodeHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
+func planNodeHTTP(opts StartPlanOptions, strategy StartStrategy) (StartPlan, error) {
 	packageJSON := filepath.Join(opts.WorkDir, "package.json")
 	if !fileExists(packageJSON) {
 		return StartPlan{}, fmt.Errorf("package.json not found at %s", opts.WorkDir)
@@ -145,19 +145,19 @@ func planNodeHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
 
 	portEnv := map[string]string{"PORT": opts.Port}
 	baseChecks := []PlanCheck{
-		{Type: "file_exists", Path: packageJSON},
-		{Type: "command_exists", Name: "pnpm"},
-		{Type: "dir_exists", Path: filepath.Join(opts.WorkDir, "node_modules")},
+		{Type: CheckFileExists, Path: packageJSON},
+		{Type: CheckCommandExists, Name: "pnpm"},
+		{Type: CheckDirExists, Path: filepath.Join(opts.WorkDir, "node_modules")},
 	}
 
-	plan := StartPlan{RuntimeProfile: opts.RuntimeProfile, ResolvedStrategy: strategy}
+	plan := StartPlan{RuntimeProfile: opts.RuntimeProfile, ResolvedStrategy: string(strategy)}
 	switch strategy {
-	case "npm-auto", "":
-		plan.ResolvedStrategy = "npm-auto"
+	case StrategyNpmAuto, "":
+		plan.ResolvedStrategy = string(StrategyNpmAuto)
 		if _, err := exec.LookPath("npm"); err != nil {
 			return StartPlan{}, fmt.Errorf("npm unavailable")
 		}
-		checks := append(baseChecks, PlanCheck{Type: "command_exists", Name: "npm"})
+		checks := append(baseChecks, PlanCheck{Type: CheckCommandExists, Name: "npm"})
 		hasStart := scripts["start"]
 		hasBuild := scripts["build"]
 		hasDev := scripts["dev"]
@@ -167,7 +167,7 @@ func planNodeHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
 			plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s try npm run build && npm run start, fallback to npm run dev", opts.WorkDir, opts.Port)
 			plan.Plan = &TypedStartPlan{
 				RuntimeProfile: string(opts.RuntimeProfile),
-				Strategy:       "npm-auto",
+				Strategy:       string(StrategyNpmAuto),
 				Workdir:        opts.WorkDir,
 				Env:            portEnv,
 				Checks:         checks,
@@ -185,7 +185,7 @@ func planNodeHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
 			plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run build && npm run start", opts.WorkDir, opts.Port)
 			plan.Plan = &TypedStartPlan{
 				RuntimeProfile: string(opts.RuntimeProfile),
-				Strategy:       "npm-auto",
+				Strategy:       string(StrategyNpmAuto),
 				Workdir:        opts.WorkDir,
 				Env:            portEnv,
 				Checks:         checks,
@@ -200,7 +200,7 @@ func planNodeHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
 			plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run start", opts.WorkDir, opts.Port)
 			plan.Plan = &TypedStartPlan{
 				RuntimeProfile: string(opts.RuntimeProfile),
-				Strategy:       "npm-auto",
+				Strategy:       string(StrategyNpmAuto),
 				Workdir:        opts.WorkDir,
 				Env:            portEnv,
 				Checks:         checks,
@@ -214,7 +214,7 @@ func planNodeHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
 			plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run dev", opts.WorkDir, opts.Port)
 			plan.Plan = &TypedStartPlan{
 				RuntimeProfile: string(opts.RuntimeProfile),
-				Strategy:       "npm-auto",
+				Strategy:       string(StrategyNpmAuto),
 				Workdir:        opts.WorkDir,
 				Env:            portEnv,
 				Checks:         checks,
@@ -226,13 +226,13 @@ func planNodeHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
 		default:
 			return StartPlan{}, fmt.Errorf("package.json is missing both start and dev scripts")
 		}
-	case "pnpm-dev":
-		checks := append(baseChecks[:2:2], PlanCheck{Type: "file_exists", Path: filepath.Join(opts.WorkDir, "node_modules/.bin/tsx")})
+	case StrategyPnpmDev:
+		checks := append(baseChecks[:2:2], PlanCheck{Type: CheckFileExists, Path: filepath.Join(opts.WorkDir, "node_modules/.bin/tsx")})
 		plan.StartCommand = fmt.Sprintf("set -eu && cd %s && if [ ! -x node_modules/.bin/tsx ]; then echo \"missing node_modules/.bin/tsx after bootstrap\" >&2; exit 1; fi && export PORT=%s && exec npm run dev", shellQuote(opts.WorkDir), shellQuote(opts.Port))
 		plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run dev", opts.WorkDir, opts.Port)
 		plan.Plan = &TypedStartPlan{
 			RuntimeProfile: string(opts.RuntimeProfile),
-			Strategy:       "pnpm-dev",
+			Strategy:       string(StrategyPnpmDev),
 			Workdir:        opts.WorkDir,
 			Env:            portEnv,
 			Checks:         checks,
@@ -241,12 +241,12 @@ func planNodeHTTP(opts StartPlanOptions, strategy string) (StartPlan, error) {
 			},
 			Description: plan.StartDescription,
 		}
-	case "pnpm-start":
+	case StrategyPnpmStart:
 		plan.StartCommand = fmt.Sprintf("set -eu && cd %s && if [ ! -d node_modules ]; then echo \"missing node_modules after bootstrap\" >&2; exit 1; fi && export PORT=%s && exec npm run start", shellQuote(opts.WorkDir), shellQuote(opts.Port))
 		plan.StartDescription = fmt.Sprintf("cd %s && PORT=%s npm run start", opts.WorkDir, opts.Port)
 		plan.Plan = &TypedStartPlan{
 			RuntimeProfile: string(opts.RuntimeProfile),
-			Strategy:       "pnpm-start",
+			Strategy:       string(StrategyPnpmStart),
 			Workdir:        opts.WorkDir,
 			Env:            portEnv,
 			Checks:         baseChecks,
