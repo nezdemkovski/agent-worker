@@ -61,6 +61,13 @@ const (
 	CodeRepoFail      EventCode = "repo.fail"
 )
 
+// Control action events.
+const (
+	CodeControlReceived  EventCode = "control.received"
+	CodeControlCompleted EventCode = "control.completed"
+	CodeControlFailed    EventCode = "control.failed"
+)
+
 type Event struct {
 	Time    string            `json:"time"`
 	Kind    string            `json:"kind"`

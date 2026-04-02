@@ -19,19 +19,19 @@ func runVerifyMode(ctx context.Context, payload *WorkerPayload, opts RunOptions)
 		return fmt.Errorf("mkdir workspace: %w", err)
 	}
 
-	bootstrapResult, err := newEventLogFile(arts.BootstrapResult)
+	bootstrapResult, err := newEventLogFile(arts.BootstrapResult, os.Stdout)
 	if err != nil {
 		return err
 	}
-	serviceResult, err := newEventLogFile(arts.ServiceResult)
+	serviceResult, err := newEventLogFile(arts.ServiceResult, os.Stdout)
 	if err != nil {
 		return err
 	}
-	mirrordResult, err := newEventLogFile(arts.MirrordResult)
+	mirrordResult, err := newEventLogFile(arts.MirrordResult, os.Stdout)
 	if err != nil {
 		return err
 	}
-	verificationResult, err := newEventLogFile(arts.VerificationResult)
+	verificationResult, err := newEventLogFile(arts.VerificationResult, os.Stdout)
 	if err != nil {
 		return err
 	}
@@ -109,9 +109,7 @@ func bootstrapPayloadRepos(payload *WorkerPayload, workspaceDir string, arts wor
 		appendLines(arts.CheckoutResult, result.CheckoutResult)
 		appendLines(arts.BranchResult, result.BranchResult)
 		appendLines(arts.BootstrapPlan, result.BootstrapPlan)
-		for _, line := range result.BootstrapResult {
-			_ = bootstrapResult.Append(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, line), repo))
-		}
+		appendBootstrapTimeline(bootstrapResult, repo, repoDir, result)
 		if err != nil {
 			appendLine(arts.CheckoutResult, fmt.Sprintf("FAIL %s: %v", repo, err))
 			return err

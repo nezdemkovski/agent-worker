@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -86,9 +87,13 @@ type workerArtifacts struct {
 type eventLogFile struct {
 	path string
 	log  *EventLog
+	out  io.Writer
 }
 
 func Run(ctx context.Context, opts RunOptions) error {
+	if err := prepareWorkerEnvironment(); err != nil {
+		return err
+	}
 	payload, err := readWorkerPayload(opts.PayloadPath)
 	if err != nil {
 		return err
@@ -112,19 +117,19 @@ func runServiceMode(ctx context.Context, payload *WorkerPayload, opts RunOptions
 		return fmt.Errorf("mkdir workspace: %w", err)
 	}
 
-	serviceResult, err := newEventLogFile(arts.ServiceResult)
+	serviceResult, err := newEventLogFile(arts.ServiceResult, os.Stdout)
 	if err != nil {
 		return err
 	}
-	mirrordResult, err := newEventLogFile(arts.MirrordResult)
+	mirrordResult, err := newEventLogFile(arts.MirrordResult, os.Stdout)
 	if err != nil {
 		return err
 	}
-	verificationResult, err := newEventLogFile(arts.VerificationResult)
+	verificationResult, err := newEventLogFile(arts.VerificationResult, os.Stdout)
 	if err != nil {
 		return err
 	}
-	bootstrapResult, err := newEventLogFile(arts.BootstrapResult)
+	bootstrapResult, err := newEventLogFile(arts.BootstrapResult, os.Stdout)
 	if err != nil {
 		return err
 	}
@@ -164,9 +169,7 @@ func runServiceMode(ctx context.Context, payload *WorkerPayload, opts RunOptions
 		appendLines(arts.CheckoutResult, result.CheckoutResult)
 		appendLines(arts.BranchResult, result.BranchResult)
 		appendLines(arts.BootstrapPlan, result.BootstrapPlan)
-		for _, line := range result.BootstrapResult {
-			_ = bootstrapResult.Append(eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, line), repo))
-		}
+		appendBootstrapTimeline(bootstrapResult, repo, repoDir, result)
 		if err != nil {
 			appendLine(arts.CheckoutResult, fmt.Sprintf("FAIL %s: %v", repo, err))
 			return err
@@ -242,24 +245,8 @@ func runServiceMode(ctx context.Context, payload *WorkerPayload, opts RunOptions
 		}
 	}
 	command := commandBuilder(arts.ServiceStartPlan, target)
-	superviseResult, err := Supervise(ctx, SuperviseOptions{
-		Command:      command,
-		ReadyURL:     readyURL,
-		ReadyTimeout: readyTimeout,
-		PIDFile:      arts.ServicePID,
-		LogFile:      arts.ServiceLog,
-	})
+	superviseResult, err := superviseServiceSession(ctx, payload, serviceName, target, command, readyURL, readyTimeout, arts, serviceResult, mirrordResult, verificationResult)
 	if err != nil {
-		var supErr *SuperviseError
-		if errors.As(err, &supErr) && supErr.Code == ReasonExitedBeforeReady {
-			_ = serviceResult.Append(withService(NewEvent(CodeServiceExitedBeforeReady, LevelError, "service process exited before readiness probe passed"), serviceName, nil))
-			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, LevelError, "service process exited before readiness"), serviceName, nil))
-			_ = verificationResult.Append(withService(NewEvent(CodeVerificationFail, LevelError, "service process exited before readiness"), serviceName, nil))
-		} else {
-			_ = serviceResult.Append(withService(NewEvent(CodeServiceReadyTimeout, LevelError, "service did not become ready at "+readyURL), serviceName, nil))
-			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, LevelError, "service readiness probe"), serviceName, nil))
-			_ = verificationResult.Append(withService(NewEvent(CodeVerificationFail, LevelError, "service did not become ready"), serviceName, nil))
-		}
 		return err
 	}
 
@@ -293,6 +280,42 @@ func runServiceMode(ctx context.Context, payload *WorkerPayload, opts RunOptions
 	}
 }
 
+func superviseServiceSession(ctx context.Context, payload *WorkerPayload, serviceName, target string, command []string, readyURL string, readyTimeout time.Duration, arts workerArtifacts, serviceResult, mirrordResult, verificationResult *eventLogFile) (*SuperviseResult, error) {
+	retriedRecovery := false
+	for {
+		superviseResult, err := Supervise(ctx, SuperviseOptions{
+			Command:      command,
+			ReadyURL:     readyURL,
+			ReadyTimeout: readyTimeout,
+			PIDFile:      arts.ServicePID,
+			LogFile:      arts.ServiceLog,
+		})
+		if err == nil {
+			return superviseResult, nil
+		}
+
+		var supErr *SuperviseError
+		if errors.As(err, &supErr) && supErr.Code == ReasonExitedBeforeReady {
+			if !retriedRecovery && isDirtyIptablesLog(arts.ServiceLog) {
+				_ = serviceResult.Append(withService(NewEvent(CodeServiceRecover, LevelWarn, "detected dirty mirrord iptables state"), serviceName, nil))
+				if recoverMirrordTarget(ctx, payload.Namespace, serviceName, target, arts.ServiceLog, serviceResult) {
+					retriedRecovery = true
+					continue
+				}
+				_ = serviceResult.Append(withService(NewEvent(CodeServiceRecoverFail, LevelError, "automatic mirrord target recovery failed"), serviceName, nil))
+			}
+			_ = serviceResult.Append(withService(NewEvent(CodeServiceExitedBeforeReady, LevelError, "service process exited before readiness probe passed"), serviceName, nil))
+			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, LevelError, "service process exited before readiness"), serviceName, nil))
+			_ = verificationResult.Append(withService(NewEvent(CodeVerificationFail, LevelError, "service process exited before readiness"), serviceName, nil))
+		} else {
+			_ = serviceResult.Append(withService(NewEvent(CodeServiceReadyTimeout, LevelError, "service did not become ready at "+readyURL), serviceName, nil))
+			_ = mirrordResult.Append(withService(NewEvent(CodeMirrordFail, LevelError, "service readiness probe"), serviceName, nil))
+			_ = verificationResult.Append(withService(NewEvent(CodeVerificationFail, LevelError, "service did not become ready"), serviceName, nil))
+		}
+		return nil, err
+	}
+}
+
 func processControlRequests(ctx context.Context, arts workerArtifacts, serviceName, repoDir string, profile RuntimeProfile, serviceURL, readyURL string, readyTimeout time.Duration, target string, commandBuilder func(planFile, target string) []string, serviceResult, mirrordResult, verificationResult *eventLogFile, currentPID *int) error {
 	matches, err := filepath.Glob(filepath.Join(arts.ControlDir, "*.request"))
 	if err != nil {
@@ -308,6 +331,8 @@ func processControlRequests(ctx context.Context, arts workerArtifacts, serviceNa
 		if err := json.Unmarshal(reqData, &req); err != nil {
 			return err
 		}
+		message, details := describeControlRequest(&req)
+		appendControlTimeline(serviceResult, &req, "received", message, details)
 		resp := ExecuteControl(ctx, &req, ControlExecOptions{
 			Command:      commandBuilder(arts.ServiceStartPlan, target),
 			PIDFile:      arts.ServicePID,
@@ -327,6 +352,11 @@ func processControlRequests(ctx context.Context, arts workerArtifacts, serviceNa
 			return err
 		}
 		_ = os.Remove(requestFile)
+		if resp.Status == StatusOK {
+			appendControlTimeline(serviceResult, &req, "completed", fmt.Sprintf("%s action completed", req.Action), nil)
+		} else if resp.Error != nil {
+			appendControlTimeline(serviceResult, &req, "failed", resp.Error.Message, map[string]string{"error_code": resp.Error.Code})
+		}
 		if resp.Status == StatusOK && req.Action == ActionRestart {
 			var restartResult RestartActionResult
 			if err := json.Unmarshal(resp.Result, &restartResult); err != nil {
@@ -397,15 +427,24 @@ func readWorkerPayload(path string) (*WorkerPayload, error) {
 	return &payload, nil
 }
 
-func newEventLogFile(path string) (*eventLogFile, error) {
+func newEventLogFile(path string, out io.Writer) (*eventLogFile, error) {
 	log := NewEventLog()
-	f := &eventLogFile{path: path, log: log}
+	if out == nil {
+		out = io.Discard
+	}
+	f := &eventLogFile{path: path, log: log, out: out}
 	return f, f.flush()
 }
 
 func (f *eventLogFile) Append(event Event) error {
 	f.log.Events = append(f.log.Events, event)
-	return f.flush()
+	if err := f.flush(); err != nil {
+		return err
+	}
+	if f.out != nil {
+		_, _ = fmt.Fprintln(f.out, formatEventLogLine(event))
+	}
+	return nil
 }
 
 func (f *eventLogFile) flush() error {
@@ -414,6 +453,35 @@ func (f *eventLogFile) flush() error {
 		return err
 	}
 	return os.WriteFile(f.path, append(data, '\n'), 0o644)
+}
+
+func formatEventLogLine(event Event) string {
+	scope := event.Kind
+	switch {
+	case event.Service != "":
+		scope = fmt.Sprintf("service %s", event.Service)
+	case event.Repo != "":
+		scope = fmt.Sprintf("repo %s", event.Repo)
+	case scope == "":
+		scope = "worker"
+	}
+
+	line := fmt.Sprintf("%s [%s] %s: %s", event.Time, event.Level, scope, event.Message)
+	if len(event.Details) == 0 {
+		return line
+	}
+
+	keys := make([]string, 0, len(event.Details))
+	for key := range event.Details {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var detailParts []string
+	for _, key := range keys {
+		detailParts = append(detailParts, fmt.Sprintf("%s=%s", key, event.Details[key]))
+	}
+	return fmt.Sprintf("%s (%s)", line, strings.Join(detailParts, ", "))
 }
 
 func writeLines(path string, lines []string) {

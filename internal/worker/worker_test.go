@@ -271,6 +271,58 @@ func TestMonitorExitsWhenProcessDies(t *testing.T) {
 	}
 }
 
+func TestFormatEventLogLineIncludesStableMetadata(t *testing.T) {
+	event := Event{
+		Time:    "2026-04-02T12:00:00Z",
+		Level:   LevelInfo,
+		Code:    CodeServiceStart,
+		Message: "starting service",
+		Service: "noona-api",
+		Details: map[string]string{
+			"target": "deploy/noona-api",
+			"url":    "http://127.0.0.1:31140",
+		},
+	}
+
+	got := formatEventLogLine(event)
+	want := "2026-04-02T12:00:00Z [info] service noona-api: starting service (target=deploy/noona-api, url=http://127.0.0.1:31140)"
+	if got != want {
+		t.Fatalf("unexpected log line:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestHumanizeBootstrapTimelineLine(t *testing.T) {
+	event := humanizeBootstrapTimelineLine("noona-api", "CHECKOUT noona-api agent/test-branch")
+	if event.Code != CodeRepoBranch {
+		t.Fatalf("expected repo branch code, got %q", event.Code)
+	}
+	if event.Message != "checking out branch agent/test-branch" {
+		t.Fatalf("unexpected message %q", event.Message)
+	}
+	if event.Repo != "noona-api" {
+		t.Fatalf("unexpected repo %q", event.Repo)
+	}
+	if event.Details["branch"] != "agent/test-branch" {
+		t.Fatalf("unexpected branch detail %#v", event.Details)
+	}
+}
+
+func TestDescribeControlRequest(t *testing.T) {
+	req := &ControlRequest{
+		Action:  ActionExec,
+		Service: "noona-api",
+		Payload: json.RawMessage(`{"command":["echo","hello"]}`),
+	}
+
+	message, details := describeControlRequest(req)
+	if message != "received command execution request" {
+		t.Fatalf("unexpected message %q", message)
+	}
+	if details["command"] != "echo hello" {
+		t.Fatalf("unexpected details %#v", details)
+	}
+}
+
 func TestExecPlanHonorsExecWorkdir(t *testing.T) {
 	t.Parallel()
 
