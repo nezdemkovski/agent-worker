@@ -19,6 +19,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "plan-start":
+		os.Exit(runPlanStart(os.Args[2:]))
 	case "supervise":
 		os.Exit(runSupervise(os.Args[2:]))
 	case "terminate":
@@ -39,6 +41,44 @@ func main() {
 		})
 		os.Exit(2)
 	}
+}
+
+func runPlanStart(args []string) int {
+	fs := flag.NewFlagSet("plan-start", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+
+	service := fs.String("service", "", "service name")
+	workDir := fs.String("workdir", "", "service working directory")
+	profile := fs.String("runtime-profile", "", "runtime profile")
+	entrypoint := fs.String("entrypoint", "", "service entrypoint")
+	strategy := fs.String("start-strategy", "", "requested start strategy")
+	port := fs.String("port", "", "service port")
+	if err := fs.Parse(args); err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		return 2
+	}
+
+	plan, err := worker.PlanStart(worker.StartPlanOptions{
+		Service:        *service,
+		WorkDir:        *workDir,
+		RuntimeProfile: worker.RuntimeProfile(*profile),
+		EntryPoint:     *entrypoint,
+		StartStrategy:  *strategy,
+		Port:           *port,
+	})
+	if err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		return 1
+	}
+
+	emitJSON(startPlanResponse{
+		Status:           worker.StatusOK,
+		RuntimeProfile:   string(plan.RuntimeProfile),
+		StartStrategy:    plan.ResolvedStrategy,
+		StartCommand:     plan.StartCommand,
+		StartDescription: plan.StartDescription,
+	})
+	return 0
 }
 
 func runSupervise(args []string) int {
