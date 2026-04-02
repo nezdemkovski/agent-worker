@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -36,6 +37,8 @@ func main() {
 		os.Exit(runMonitor(os.Args[2:]))
 	case "hash":
 		os.Exit(runHash(os.Args[2:]))
+	case "control":
+		os.Exit(runControl(os.Args[2:]))
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -317,6 +320,92 @@ func runHash(args []string) int {
 	return 0
 }
 
+func runControl(args []string) int {
+	fs := flag.NewFlagSet("control", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+
+	requestFile := fs.String("request-file", "", "path to control request JSON")
+	responseFile := fs.String("response-file", "", "path to write control response JSON")
+	pidFile := fs.String("pid-file", "", "path to pid file")
+	readyURL := fs.String("ready-url", "", "readiness URL")
+	readyTimeout := fs.Duration("ready-timeout", 30*time.Second, "readiness timeout")
+	logFile := fs.String("log-file", "", "service log file")
+	repoDir := fs.String("repo-dir", "", "repo directory for source hash")
+	profile := fs.String("profile", "", "runtime profile for source hash")
+	planFile := fs.String("plan-file", "", "service start plan JSON file")
+	mirrordTarget := fs.String("mirrord-target", "", "mirrord target")
+
+	if err := fs.Parse(args); err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: err.Error()})
+		return 2
+	}
+
+	reqData, err := os.ReadFile(*requestFile)
+	if err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("read request: %v", err)})
+		return 1
+	}
+
+	var req worker.ControlRequest
+	if err := json.Unmarshal(reqData, &req); err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("parse request: %v", err)})
+		return 1
+	}
+
+	var resp *worker.ControlResponse
+
+	switch req.Action {
+	case worker.ActionRestart:
+		command := []string{"mirrord", "exec", "--target", *mirrordTarget, "--", "dockhand", "exec-plan", "--plan-file", *planFile}
+		result, err := worker.Restart(context.Background(), worker.RestartOptions{
+			PIDFile:      *pidFile,
+			Command:      command,
+			ReadyURL:     *readyURL,
+			ReadyTimeout: *readyTimeout,
+			LogFile:      *logFile,
+			RepoDir:      *repoDir,
+			Profile:      worker.RuntimeProfile(*profile),
+		})
+		if err != nil {
+			var supErr *worker.SuperviseError
+			errCode := "restart.failed"
+			if errors.As(err, &supErr) {
+				errCode = "restart." + string(supErr.Code)
+			}
+			resp = worker.NewControlErrorResponse(&req, errCode, err.Error())
+		} else {
+			resp = worker.NewControlResponse(&req, worker.StatusOK)
+			_ = resp.SetResult(worker.RestartActionResult{
+				OldPID:        result.OldPID,
+				NewPID:        result.NewPID,
+				URL:           *readyURL,
+				ReadyURL:      result.ReadyURL,
+				OldSourceHash: result.OldSourceHash,
+				NewSourceHash: result.NewSourceHash,
+				OldCmdline:    result.OldCmdline,
+				NewCmdline:    result.NewCmdline,
+			})
+		}
+	default:
+		resp = worker.NewControlErrorResponse(&req, "unsupported_action", fmt.Sprintf("unsupported control action %q", req.Action))
+	}
+
+	respData, err := json.Marshal(resp)
+	if err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("encode response: %v", err)})
+		return 1
+	}
+	if err := os.WriteFile(*responseFile, respData, 0o644); err != nil {
+		emitJSON(errorResponse{Status: worker.StatusError, Reason: fmt.Sprintf("write response: %v", err)})
+		return 1
+	}
+
+	emitJSON(struct {
+		Status string `json:"status"`
+	}{Status: worker.StatusOK})
+	return 0
+}
+
 func runRestart(args []string) int {
 	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
 	fs.SetOutput(ioDiscard{})
@@ -410,6 +499,7 @@ Usage:
   dockhand restart --pid-file PATH --ready-url URL [--ready-timeout DURATION] [--log-file PATH] [--grace DURATION] -- <command...>
   dockhand monitor --pid PID [--interval DURATION] [--once]
   dockhand hash --repo-dir PATH [--profile PROFILE]
+  dockhand control --request-file PATH --response-file PATH [--pid-file PATH] [--ready-url URL] [--mirrord-target TARGET] [--plan-file PATH]
 `))
 }
 
