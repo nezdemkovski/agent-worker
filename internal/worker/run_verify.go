@@ -23,18 +23,22 @@ func runVerifyMode(ctx context.Context, payload *WorkerPayload, opts RunOptions)
 	if err != nil {
 		return err
 	}
+	defer bootstrapResult.Close()
 	serviceResult, err := newEventLogFile(arts.ServiceResult, os.Stdout)
 	if err != nil {
 		return err
 	}
+	defer serviceResult.Close()
 	mirrordResult, err := newEventLogFile(arts.MirrordResult, os.Stdout)
 	if err != nil {
 		return err
 	}
+	defer mirrordResult.Close()
 	verificationResult, err := newEventLogFile(arts.VerificationResult, os.Stdout)
 	if err != nil {
 		return err
 	}
+	defer verificationResult.Close()
 
 	writeLines(arts.ServicePlan, payload.ServicePlan)
 	writeLines(arts.VerificationPlan, payload.VerificationPlan)
@@ -106,8 +110,8 @@ func bootstrapPayloadRepos(payload *WorkerPayload, workspaceDir string, arts wor
 			PNPMStateDir: os.Getenv("PNPM_STATE_DIR"),
 		})
 		appendLines(arts.ClonePlan, result.ClonePlan)
-		appendLines(arts.CheckoutResult, result.CheckoutResult)
-		appendLines(arts.BranchResult, result.BranchResult)
+		appendLines(arts.CheckoutResult, result.CheckoutOutput)
+		appendLines(arts.BranchResult, result.BranchOutput)
 		appendLines(arts.BootstrapPlan, result.BootstrapPlan)
 		appendBootstrapTimeline(bootstrapResult, repo, repoDir, result)
 		if err != nil {

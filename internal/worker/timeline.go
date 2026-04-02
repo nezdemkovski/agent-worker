@@ -8,46 +8,14 @@ import (
 
 func appendBootstrapTimeline(log *eventLogFile, repo, repoDir string, result *BootstrapRepoResult) {
 	_ = log.Append(eventWithRepo(NewEvent(CodeRepoCheckout, LevelInfo, "preparing repository in "+repoDir), repo))
-	appendBootstrapTimelineLines(log, repo, result.CheckoutResult)
-	appendBootstrapTimelineLines(log, repo, result.BranchResult)
-	appendBootstrapTimelineLines(log, repo, result.BootstrapResult)
+	appendBootstrapTimelineEvents(log, result.CheckoutEvents)
+	appendBootstrapTimelineEvents(log, result.BranchEvents)
+	appendBootstrapTimelineEvents(log, result.BootstrapEvents)
 }
 
-func appendBootstrapTimelineLines(log *eventLogFile, repo string, lines []string) {
-	for _, line := range lines {
-		event := humanizeBootstrapTimelineLine(repo, line)
+func appendBootstrapTimelineEvents(log *eventLogFile, events []Event) {
+	for _, event := range events {
 		_ = log.Append(event)
-	}
-}
-
-func humanizeBootstrapTimelineLine(repo, line string) Event {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
-		return eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "repository step completed"), repo)
-	}
-
-	switch {
-	case strings.HasPrefix(trimmed, "CLONE "+repo):
-		return eventWithRepo(NewEvent(CodeRepoClone, LevelInfo, "cloning repository"), repo)
-	case strings.HasPrefix(trimmed, "FETCH "+repo):
-		return eventWithRepo(NewEvent(CodeRepoCheckout, LevelInfo, "fetching latest changes"), repo)
-	case strings.HasPrefix(trimmed, "CHECKOUT "+repo+" "):
-		branch := strings.TrimPrefix(trimmed, "CHECKOUT "+repo+" ")
-		event := eventWithRepo(NewEvent(CodeRepoBranch, LevelInfo, "checking out branch "+branch), repo)
-		event.Details = map[string]string{"branch": branch}
-		return event
-	case strings.HasPrefix(trimmed, "GO_MOD_DOWNLOAD "+repo):
-		return eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "downloading Go modules"), repo)
-	case strings.HasPrefix(trimmed, "PNPM_FETCH "+repo):
-		return eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "fetching pnpm dependencies"), repo)
-	case strings.HasPrefix(trimmed, "PNPM_INSTALL "+repo):
-		return eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, "installing pnpm dependencies"), repo)
-	case strings.HasPrefix(trimmed, "SKIP "+repo+": "):
-		return eventWithRepo(NewEvent(CodeRepoBootstrap, LevelWarn, strings.TrimPrefix(trimmed, "SKIP "+repo+": ")), repo)
-	case strings.HasPrefix(trimmed, "FAIL "+repo+": "):
-		return eventWithRepo(NewEvent(CodeRepoFail, LevelError, strings.TrimPrefix(trimmed, "FAIL "+repo+": ")), repo)
-	default:
-		return eventWithRepo(NewEvent(CodeRepoBootstrap, LevelInfo, trimmed), repo)
 	}
 }
 

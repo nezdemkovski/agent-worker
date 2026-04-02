@@ -70,16 +70,19 @@ type startPlanResponse struct {
 }
 
 type bootstrapRepoResponse struct {
-	Version         int      `json:"version"`
-	Status          string   `json:"status"`
-	Reason          string   `json:"reason,omitempty"`
-	ClonePlan       []string `json:"clone_plan,omitempty"`
-	CheckoutResult  []string `json:"checkout_result,omitempty"`
-	BranchResult    []string `json:"branch_result,omitempty"`
-	BootstrapPlan   []string `json:"bootstrap_plan,omitempty"`
-	BootstrapResult []string `json:"bootstrap_result,omitempty"`
-	BranchReady     string   `json:"branch_ready,omitempty"`
-	PreparedRepo    string   `json:"prepared_repo,omitempty"`
+	Version         int            `json:"version"`
+	Status          string         `json:"status"`
+	Reason          string         `json:"reason,omitempty"`
+	ClonePlan       []string       `json:"clone_plan,omitempty"`
+	CheckoutOutput  []string       `json:"checkout_output,omitempty"`
+	CheckoutEvents  []worker.Event `json:"checkout_events,omitempty"`
+	BranchOutput    []string       `json:"branch_output,omitempty"`
+	BranchEvents    []worker.Event `json:"branch_events,omitempty"`
+	BootstrapPlan   []string       `json:"bootstrap_plan,omitempty"`
+	BootstrapOutput []string       `json:"bootstrap_output,omitempty"`
+	BootstrapEvents []worker.Event `json:"bootstrap_events,omitempty"`
+	BranchReady     string         `json:"branch_ready,omitempty"`
+	PreparedRepo    string         `json:"prepared_repo,omitempty"`
 }
 
 func emitJSON(v any) {

@@ -14,19 +14,19 @@ type EventCode string
 
 // Service lifecycle events.
 const (
-	CodeServiceTarget           EventCode = "service.target"
-	CodeServiceStart            EventCode = "service.start"
-	CodeServiceStartStrategy    EventCode = "service.start_strategy"
-	CodeServiceStartCommand     EventCode = "service.start_command"
-	CodeServiceReady            EventCode = "service.ready"
-	CodeServiceReadyTimeout     EventCode = "service.ready.timeout"
+	CodeServiceTarget            EventCode = "service.target"
+	CodeServiceStart             EventCode = "service.start"
+	CodeServiceStartStrategy     EventCode = "service.start_strategy"
+	CodeServiceStartCommand      EventCode = "service.start_command"
+	CodeServiceReady             EventCode = "service.ready"
+	CodeServiceReadyTimeout      EventCode = "service.ready.timeout"
 	CodeServiceExitedBeforeReady EventCode = "service.exited_before_ready"
-	CodeServicePlanFail         EventCode = "service.plan.fail"
-	CodeServiceSkip             EventCode = "service.skip"
-	CodeServiceFail             EventCode = "service.fail"
-	CodeServiceRecover          EventCode = "service.recover"
-	CodeServiceRecoverFail      EventCode = "service.recover.fail"
-	CodeServiceSessionFail      EventCode = "service.session.fail"
+	CodeServicePlanFail          EventCode = "service.plan.fail"
+	CodeServiceSkip              EventCode = "service.skip"
+	CodeServiceFail              EventCode = "service.fail"
+	CodeServiceRecover           EventCode = "service.recover"
+	CodeServiceRecoverFail       EventCode = "service.recover.fail"
+	CodeServiceSessionFail       EventCode = "service.session.fail"
 )
 
 // Mirrord execution events.

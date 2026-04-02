@@ -48,11 +48,11 @@ exit 0
 	if !strings.Contains(result.ClonePlan[0], "git clone --depth 1") {
 		t.Fatalf("expected shallow clone plan, got %q", result.ClonePlan[0])
 	}
-	if !containsLine(result.CheckoutResult, "CLONE repo1") {
-		t.Fatalf("expected clone marker, got %+v", result.CheckoutResult)
+	if !containsEvent(result.CheckoutEvents, CodeRepoClone, LevelInfo, "cloning repository") {
+		t.Fatalf("expected clone event, got %+v", result.CheckoutEvents)
 	}
-	if !containsLine(result.BranchResult, "CHECKOUT repo1 agent/test-branch") {
-		t.Fatalf("expected branch marker, got %+v", result.BranchResult)
+	if !containsEvent(result.BranchEvents, CodeRepoBranch, LevelInfo, "checking out branch agent/test-branch") {
+		t.Fatalf("expected branch event, got %+v", result.BranchEvents)
 	}
 	if result.BranchReady != "repo1:agent/test-branch" {
 		t.Fatalf("unexpected branch ready %q", result.BranchReady)
@@ -114,11 +114,11 @@ exit 0
 		t.Fatalf("BootstrapRepo() error = %v", err)
 	}
 
-	if !containsLine(result.BootstrapResult, "GO_MOD_DOWNLOAD repo1") {
-		t.Fatalf("expected go bootstrap marker, got %+v", result.BootstrapResult)
+	if !containsEvent(result.BootstrapEvents, CodeRepoBootstrap, LevelInfo, "downloading Go modules") {
+		t.Fatalf("expected go bootstrap event, got %+v", result.BootstrapEvents)
 	}
-	if !containsLine(result.BootstrapResult, "PNPM_FETCH repo1") {
-		t.Fatalf("expected pnpm fetch marker, got %+v", result.BootstrapResult)
+	if !containsEvent(result.BootstrapEvents, CodeRepoBootstrap, LevelInfo, "fetching pnpm dependencies") {
+		t.Fatalf("expected pnpm fetch event, got %+v", result.BootstrapEvents)
 	}
 	if dirEntries, _ := os.ReadDir(filepath.Join(pnpmStore, "v3", "projects")); len(dirEntries) != 0 {
 		t.Fatalf("expected stale project links to be removed, got %d entries", len(dirEntries))
@@ -185,11 +185,11 @@ exit 99
 	if !strings.Contains(result.ClonePlan[0], "git clone --depth 1") {
 		t.Fatalf("expected shallow clone plan for smoke mode, got %q", result.ClonePlan[0])
 	}
-	if !containsLine(result.BootstrapResult, "SKIP repo1: smoke verification skips go module bootstrap") {
-		t.Fatalf("expected smoke go bootstrap skip marker, got %+v", result.BootstrapResult)
+	if !containsEvent(result.BootstrapEvents, CodeRepoBootstrap, LevelWarn, "smoke verification skips go module bootstrap") {
+		t.Fatalf("expected smoke go bootstrap skip event, got %+v", result.BootstrapEvents)
 	}
-	if !containsLine(result.BootstrapResult, "SKIP repo1: smoke verification skips pnpm bootstrap") {
-		t.Fatalf("expected smoke pnpm bootstrap skip marker, got %+v", result.BootstrapResult)
+	if !containsEvent(result.BootstrapEvents, CodeRepoBootstrap, LevelWarn, "smoke verification skips pnpm bootstrap") {
+		t.Fatalf("expected smoke pnpm bootstrap skip event, got %+v", result.BootstrapEvents)
 	}
 	if dirEntries, _ := os.ReadDir(filepath.Join(pnpmStore, "v3", "projects")); len(dirEntries) != 0 {
 		t.Fatalf("expected stale project links to be removed, got %d entries", len(dirEntries))
@@ -222,8 +222,8 @@ exit 0
 	if err == nil {
 		t.Fatal("expected fatal clone error")
 	}
-	if !containsLine(result.CheckoutResult, "FAIL repo1: git clone") {
-		t.Fatalf("expected clone failure marker, got %+v", result.CheckoutResult)
+	if !containsEvent(result.CheckoutEvents, CodeRepoFail, LevelError, "git clone failed") {
+		t.Fatalf("expected clone failure event, got %+v", result.CheckoutEvents)
 	}
 }
 
@@ -234,9 +234,9 @@ func writeScript(t *testing.T, path, content string) {
 	}
 }
 
-func containsLine(lines []string, want string) bool {
-	for _, line := range lines {
-		if line == want {
+func containsEvent(events []Event, code EventCode, level EventLevel, message string) bool {
+	for _, event := range events {
+		if event.Code == code && event.Level == level && event.Message == message {
 			return true
 		}
 	}

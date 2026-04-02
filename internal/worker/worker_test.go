@@ -291,8 +291,32 @@ func TestFormatEventLogLineIncludesStableMetadata(t *testing.T) {
 	}
 }
 
-func TestHumanizeBootstrapTimelineLine(t *testing.T) {
-	event := humanizeBootstrapTimelineLine("noona-api", "CHECKOUT noona-api agent/test-branch")
+func TestAppendBootstrapTimelineUsesTypedEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bootstrap-result.json")
+	logFile, err := newEventLogFile(path, nil)
+	if err != nil {
+		t.Fatalf("newEventLogFile(): %v", err)
+	}
+	defer logFile.Close()
+
+	result := &BootstrapRepoResult{
+		BranchEvents: []Event{{
+			Time:    "2026-04-02T12:00:00Z",
+			Kind:    "repo",
+			Level:   LevelInfo,
+			Code:    CodeRepoBranch,
+			Message: "checking out branch agent/test-branch",
+			Repo:    "noona-api",
+			Details: map[string]string{"branch": "agent/test-branch"},
+		}},
+	}
+
+	appendBootstrapTimeline(logFile, "noona-api", "/workspace/noona-api", result)
+
+	if len(logFile.log.Events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(logFile.log.Events))
+	}
+	event := logFile.log.Events[1]
 	if event.Code != CodeRepoBranch {
 		t.Fatalf("expected repo branch code, got %q", event.Code)
 	}
